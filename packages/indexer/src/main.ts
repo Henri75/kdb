@@ -29,6 +29,9 @@ async function main() {
     collectionNameFor(embedder.name, embedder.model, embedder.dim),
   );
   await vectors.ensure(embedder.dim);
+  // Publish the active embedding config so api/mcp query the same collection.
+  await catalog.setSetting('active_collection', vectors.collection);
+  await catalog.setSetting('active_embedder', `${embedder.name}/${embedder.model}/${embedder.dim}`);
   console.log(`[indexer] qdrant collection ready: ${vectors.collection}`);
 
   const deps: PipelineDeps = { catalog, vectors, embedder };
@@ -38,6 +41,17 @@ async function main() {
   const worker = new Worker<ScanJobData>(
     SCAN_QUEUE,
     async (job) => {
+      // Manual trigger from the API: expand into per-project scan jobs.
+      const data = job.data as ScanJobData & { trigger?: string; project?: string };
+      if (data.trigger === 'manual') {
+        const runId = await catalog.startRun('manual');
+        const enqueued = await scheduleScans(cfg, catalog, queue, {
+          project: data.project,
+          full: data.full,
+        });
+        await catalog.finishRun(runId, { enqueued });
+        return { enqueued };
+      }
       const t0 = Date.now();
       const { chunksIndexed } = await processScanJob(deps, job.data);
       if (chunksIndexed > 0) {

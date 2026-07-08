@@ -86,6 +86,12 @@ CREATE TABLE IF NOT EXISTS index_errors (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS index_runs (
   id BIGSERIAL PRIMARY KEY,
   kind TEXT NOT NULL,
@@ -406,6 +412,19 @@ export class Catalog {
       lastRunAt: run.rows[0].t?.toISOString(),
       bySource: Object.fromEntries(bySource.rows.map((r2) => [r2.source_type, r2.c])),
     };
+  }
+
+  async setSetting(key: string, value: string): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO settings (key, value, updated_at) VALUES ($1,$2,now())
+       ON CONFLICT (key) DO UPDATE SET value=$2, updated_at=now()`,
+      [key, value],
+    );
+  }
+
+  async getSetting(key: string): Promise<string | null> {
+    const r = await this.pool.query('SELECT value FROM settings WHERE key=$1', [key]);
+    return r.rows[0]?.value ?? null;
   }
 
   async logError(projectId: number | null, path: string, stage: string, message: string) {
