@@ -79,7 +79,7 @@ interface FileStat {
 
 function fileChanged(stat: FileStat, state: { mtimeMs: number; size: number } | null, full?: boolean) {
   if (full || !state) return true;
-  return stat.mtimeMs !== state.mtimeMs || stat.size !== state.size;
+  return Math.trunc(stat.mtimeMs) !== state.mtimeMs || stat.size !== state.size;
 }
 
 /** Read appended bytes from offset up to the last complete line. */
@@ -127,7 +127,7 @@ async function scanKdb(deps: PipelineDeps, job: ScanJobData, projectId: number):
       const inserted = await deps.catalog.insertEntries(projectId, entries);
       indexed += await indexEntries(deps, inserted);
       await deps.catalog.setScanState(projectId, f.sourceType, f.path, {
-        mtimeMs: stat.mtimeMs, size: stat.size, byteOffset: stat.size,
+        mtimeMs: Math.trunc(stat.mtimeMs), size: stat.size, byteOffset: stat.size,
       });
     } catch (e) {
       await deps.catalog.logError(projectId, f.path, 'kdb-parse', (e as Error).message);
@@ -143,13 +143,13 @@ async function scanClaude(deps: PipelineDeps, job: ScanJobData, projectId: numbe
       try {
         const stat = statSync(path);
         const state = job.full ? null : await deps.catalog.getScanState(projectId, 'claude_session', path);
-        if (state && stat.mtimeMs === state.mtimeMs && stat.size === state.size) continue;
+        if (state && Math.trunc(stat.mtimeMs) === state.mtimeMs && stat.size === state.size) continue;
         // Shrunk file (rare rewrite) → restart from 0; otherwise tail from last offset.
         const offset = state && stat.size >= state.byteOffset ? state.byteOffset : 0;
         const { lines, newOffset } = readTailLines(path, offset);
         if (!lines.length) {
           await deps.catalog.setScanState(projectId, 'claude_session', path, {
-            mtimeMs: stat.mtimeMs, size: stat.size, byteOffset: newOffset,
+            mtimeMs: Math.trunc(stat.mtimeMs), size: stat.size, byteOffset: newOffset,
           });
           continue;
         }
@@ -173,7 +173,7 @@ async function scanClaude(deps: PipelineDeps, job: ScanJobData, projectId: numbe
         };
         await deps.catalog.upsertSession(projectId, merged, path);
         await deps.catalog.setScanState(projectId, 'claude_session', path, {
-          mtimeMs: stat.mtimeMs, size: stat.size, byteOffset: newOffset,
+          mtimeMs: Math.trunc(stat.mtimeMs), size: stat.size, byteOffset: newOffset,
         });
       } catch (e) {
         await deps.catalog.logError(projectId, path, 'claude-distill', (e as Error).message);
@@ -227,7 +227,7 @@ async function scanDocs(deps: PipelineDeps, job: ScanJobData, projectId: number)
       const inserted = await deps.catalog.insertEntries(projectId, entries);
       indexed += await indexEntries(deps, inserted);
       await deps.catalog.setScanState(projectId, 'doc', path, {
-        mtimeMs: stat.mtimeMs, size: stat.size, byteOffset: stat.size,
+        mtimeMs: Math.trunc(stat.mtimeMs), size: stat.size, byteOffset: stat.size,
       });
     } catch (e) {
       await deps.catalog.logError(projectId, path, 'doc-parse', (e as Error).message);

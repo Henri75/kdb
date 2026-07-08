@@ -1,0 +1,125 @@
+# KDBScope stack. Copy .env.example to .env first (make env).
+# All host ports bind to 127.0.0.1 — this is a single-user local tool.
+
+x-node-common: &node-common
+  restart: unless-stopped
+  env_file: .env
+  environment:
+    CODE_ROOT: /data/code
+    CLAUDE_PROJECTS_DIR: /data/claude/projects
+    DATABASE_URL: postgres://kdbscope:kdbscope@postgres:5432/kdbscope
+    REDIS_URL: redis://redis:6379
+    QDRANT_URL: http://qdrant:6333
+    KDBSCOPE_API_URL: http://api:8710
+  extra_hosts:
+    - 'host.docker.internal:host-gateway'
+
+services:
+  indexer:
+    build:
+      context: .
+      dockerfile: docker/node.Dockerfile
+      args: { SERVICE: indexer }
+    <<: *node-common
+    volumes:
+      - '${CODE_ROOT_HOST:-/Users/nasta/__CODING NEW}:/data/code:ro'
+      - '${CLAUDE_PROJECTS_HOST:-/Users/nasta/.claude/projects}:/data/claude/projects:ro'
+      - hf_cache:/app/.cache
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      qdrant: { condition: service_started }
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/node.Dockerfile
+      args: { SERVICE: api }
+    <<: *node-common
+    ports:
+      - '127.0.0.1:${API_PORT:-8710}:8710'
+    volumes:
+      - hf_cache:/app/.cache
+    healthcheck:
+      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:8710/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      qdrant: { condition: service_started }
+
+  mcp:
+    build:
+      context: .
+      dockerfile: docker/node.Dockerfile
+      args: { SERVICE: mcp }
+    <<: *node-common
+    ports:
+      - '127.0.0.1:${MCP_PORT:-8711}:8711'
+    healthcheck:
+      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:8711/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      api: { condition: service_healthy }
+
+  ui:
+    build:
+      context: .
+      dockerfile: docker/ui.Dockerfile
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:${UI_PORT:-8712}:80'
+    depends_on:
+      api: { condition: service_healthy }
+
+  qdrant:
+    image: qdrant/qdrant:v1.18.2@sha256:75eab8c4ba42096724fdcfde8b4de0b5713d529dde32f285a1f86fdcb2c9e50c
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:${QDRANT_PORT:-6363}:6333'
+      - '127.0.0.1:${QDRANT_GRPC_PORT:-6364}:6334'
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  redis:
+    image: redis:8.8.0-alpine@sha256:9d317178eceac8454a2284a9e6df2466b93c745529947f0cd42a0fa9609d7005
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes']
+    ports:
+      - '127.0.0.1:${REDIS_PORT:-6390}:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  postgres:
+    image: postgres:18.4@sha256:22c89fe0d0f507606260237fd55e51f6137f58b2d5bcf6152242b96d9fe8f9a4
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: kdbscope
+      POSTGRES_PASSWORD: kdbscope
+      POSTGRES_DB: kdbscope
+    ports:
+      - '127.0.0.1:${POSTGRES_PORT:-5460}:5432'
+    volumes:
+      # PG18 image convention: mount the parent dir (data lives in a subdir,
+      # which keeps future pg_upgrade --link possible).
+      - pg_data:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U kdbscope']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  qdrant_data:
+  redis_data:
+  pg_data:
+  hf_cache:

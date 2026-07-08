@@ -121,7 +121,16 @@ export class Catalog {
   }
 
   async migrate(): Promise<void> {
-    await this.pool.query(SCHEMA);
+    // Several services migrate on boot; an advisory lock serializes them
+    // (concurrent CREATE TABLE IF NOT EXISTS races on pg_type otherwise).
+    const client = await this.pool.connect();
+    try {
+      await client.query('SELECT pg_advisory_lock(732015)');
+      await client.query(SCHEMA);
+    } finally {
+      await client.query('SELECT pg_advisory_unlock(732015)').catch(() => {});
+      client.release();
+    }
   }
 
   async close(): Promise<void> {
