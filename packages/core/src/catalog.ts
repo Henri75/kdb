@@ -117,6 +117,9 @@ export class Catalog {
   readonly pool: pg.Pool;
 
   constructor(databaseUrl: string) {
+    // BIGSERIAL/int8 come back as strings by default; our ids fit safely in a
+    // double, and string ids silently break Map lookups during search hydration.
+    pg.types.setTypeParser(20, (v) => parseInt(v, 10));
     this.pool = new pg.Pool({ connectionString: databaseUrl, max: 10 });
   }
 

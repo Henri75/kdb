@@ -25,3 +25,22 @@
 
 **Status:**
 - Completed
+---
+### [2026-07-08] - Bugfix: search hydration dropped all hits (pg int8-as-string)
+
+**Objective:**
+- Fix /api/search returning 0 hits while Qdrant contained matching points.
+
+**Summary of Work:**
+- Root cause (verified by querying Qdrant directly, then the API): node-postgres returns BIGSERIAL ids as strings; SearchService.hydrate keyed its Map by string '7256' while Qdrant payload lookups used number 7256 — every hit dropped. FTS fallback worked, masking it as "hybrid but empty".
+- Fix: pg.types.setTypeParser(20, parseInt) in Catalog constructor (ids fit in a double).
+
+**Code/Files Modified:**
+- packages/core/src/catalog.ts
+
+**Outcomes & Lessons Learned:**
+- **What Worked:** live verify post-rebuild: "pgbouncer crash loop" returns the real DeepCast changelog/component entries; Ask returns a cited answer via g2p; MCP tools/list green.
+- **What Failed:** n/a (first-principles gate: hypothesis confirmed at each layer before the fix).
+
+**Status:**
+- Completed
