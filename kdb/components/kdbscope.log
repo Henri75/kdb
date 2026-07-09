@@ -167,3 +167,38 @@
 
 **Status:**
 - Completed
+---
+### [2026-07-09] - Sessions were half-captured; Ask was a dead end
+
+**Objective:**
+- Fix the session view issues reported from screenshots, add search/filter across the views, extract structured information from transcripts, and make Ask conversational.
+
+**Summary of Work:**
+- Session titles/prompt counts: the 800-entry cap `break`ed the read loop, so Claude's `summary` event (written at either END of a transcript) was never reached. Only 24 of 1041 sessions had a title. The cap now bounds what we KEEP, not what we READ; metadata is gathered across the whole stream. Sessions with no summary fall back to their first prompt.
+- Distiller: removed the 280-char assistant filter (measured: dropped ~53% of replies to save ~7% of prose volume) and added one `action` entry per turn recording what was actually done (tool + target, never the diff or command body).
+- Message kinds: prompt / plan / insight / summary / action / response, classified at parse time from structures the text actually uses (`★ Insight`, `## Summary`, "Implement the following plan:"). Exposed as a `kind` filter on the Qdrant payload, the Postgres FTS fallback, /api/search, `kdbs search --kind`, and the kdb_search MCP tool.
+- Ask conversation: follow-ups carry prior turns; retry re-asks with history stopping BEFORE the question being re-answered; any turn is deletable; history is whitelisted server-side. Switching project now clears results and shows the active scope.
+- Filters in sessions (list + in-session with kind chips), timeline (plus a persistent FEED/TABLE layout toggle), and components.
+
+**Key Decisions & Rationale:**
+- Length is a bad proxy for value; kind is a good one. "No security findings." is exactly what you go looking for months later.
+- Classification without a filter is decoration. `kind` had to reach BOTH the vector payload and the FTS fallback, or the feature would silently disappear in degraded mode.
+- A retry must not send the model the answer it is replacing, or it simply agrees with it. History is sliced to stop before that question — tested directly.
+- Changing the project clears results rather than silently re-running: the citations pointed at entries that no longer exist in the new scope, so keeping them on screen is actively misleading.
+- A third migration marker (EXTRACTION_SCHEME) rather than abusing ID_SCHEME or PROJECT_GROUPING: the ids did not change and the grouping did not change. The three markers are now a table, not a ternary chain.
+
+**Code/Files Modified:**
+- packages/core/src/{parsers/claudeJsonl,types,qdrant,catalog,ask}.ts
+- packages/indexer/src/{pipeline,main}.ts, packages/api/src/app.ts
+- packages/mcp/src/tools.ts, packages/cli/src/main.ts
+- packages/ui/src/{types,usePersistentState}.ts, components/ui.tsx,
+  views/{SearchView,AskConversation,SessionsView,TimelineView,ComponentsView}.tsx
+- docs/{architecture,api,cli,mcp,getting-started}.md, README.md
+
+**Outcomes & Lessons Learned:**
+- **What Worked:** verified on live data after the rebuild — 62/62 sessions titled (was 24/1041), 125 insights / 10 summaries / 6 plans / 1680 actions classified in DeepCast, `?kind=insight` returns only insight blocks in hybrid mode, and a live follow-up ("and how was it fixed?") correctly resolved "it" from the prior turn. 196 -> 223 tests.
+- **What Failed:** the "1 prompt" in the screenshot was NOT a bug — that session really is a one-shot /security-review. Checking the raw JSONL before "fixing" it avoided inventing a defect. Separately, backticks in a `git commit -m "..."` string were shell-interpreted and silently mangled the message; amended with a heredoc.
+- **Pattern:** two definitions of the same thing again — `SessionEntryKind` in the parser and `EntryKind` in types. Collapsed to one.
+
+**Status:**
+- Completed

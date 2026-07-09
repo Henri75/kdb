@@ -22,3 +22,5 @@
 - [2026-07-09] [kdbscope] DONE: nginx cached the api container IP -> every /api call 502'd after an api rebuild
 - [2026-07-09] [kdbscope] DONE: claude transcripts matched on container paths, splitting every project in two
 - [2026-07-09] [kdbscope] DONE: multiple project roots (CODE_ROOT_HOST_2..5)
+- [2026-07-09] [kdbscope] Qdrant 'kind' payload index is only created on a NEW collection; existing collections filter without it (slower). Add an ensure-index-on-existing path.
+- [2026-07-09] [kdbscope] Timeline filter only searches loaded pages; consider a server-side timeline search.

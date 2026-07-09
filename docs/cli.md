@@ -14,6 +14,8 @@ Install on the host: `make cli-link` (npm link). Point it elsewhere with
 ```bash
 kdbs search qdrant timeout fix -p deepcast -n 15
 kdbs search "video import" -s git_commit
+kdbs search qdrant --kind insight        # only ★ Insight blocks
+kdbs search readme --kind summary        # only wrap-ups
 kdbs ask "what were the bug fixes in the video import microservice?"   # streams
 kdbs ask --no-stream "…"      # wait for the whole answer
 kdbs --json ask "…"           # buffered: one valid JSON document

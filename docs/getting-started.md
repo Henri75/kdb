@@ -114,6 +114,8 @@ If a banner says search is *degraded*, it names what broke and what it costs.
 kdbs search qdrant timeout fix              # across everything
 kdbs search "video import" -p deepcast      # one project
 kdbs search pgbouncer -s kdb_changelog      # one source type
+kdbs search qdrant --kind insight           # only ★ Insight blocks
+kdbs search readme --kind summary           # only wrap-ups
 
 kdbs ask "what were the bug fixes in the video import microservice?"
 kdbs ask "how does VidSight work?" -p deepcast
