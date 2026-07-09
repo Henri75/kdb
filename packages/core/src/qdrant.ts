@@ -1,6 +1,10 @@
 import { QdrantClient } from '@qdrant/js-client-rest';
 import type { SearchFilters } from './types.js';
 import type { SparseVector } from './sparse.js';
+import { withRetry } from './retry.js';
+
+/** Points per HTTP call. Keeps each request well inside Qdrant's 5s timeout. */
+const UPSERT_BATCH = 64;
 
 /**
  * Qdrant wrapper: one collection per embedding config, named vectors
@@ -29,12 +33,19 @@ export function collectionNameFor(provider: string, model: string, dim: number):
 
 export class VectorStore {
   private client: QdrantClient;
+  /** Mutable: the indexer can switch collections when the embedder changes. */
+  collection: string;
 
-  constructor(
-    url: string,
-    readonly collection: string,
-  ) {
-    this.client = new QdrantClient({ url });
+  constructor(url: string, collection: string) {
+    // Client-side ceiling above Qdrant's own 5s REST timeout, so a slow-but-
+    // progressing request is ended by the server, not silently by us.
+    this.client = new QdrantClient({ url, timeout: 60_000 });
+    this.collection = collection;
+  }
+
+  /** Point this store at a different collection (e.g. after a model switch). */
+  useCollection(name: string): void {
+    this.collection = name;
   }
 
   async healthy(): Promise<boolean> {
@@ -62,19 +73,32 @@ export class VectorStore {
     }
   }
 
+  /**
+   * Bulk upsert. `wait: false` on purpose: waiting forces a synchronous flush
+   * per batch, which under ingest load exceeds Qdrant's REST
+   * client_request_timeout (5s) and surfaces as `fetch failed`. The write is
+   * still durable (accepted into the WAL); it just isn't searchable the same
+   * millisecond, which no caller requires. Retried because point ids are
+   * deterministic, so a replayed batch is a no-op.
+   */
   async upsert(points: VectorPoint[]): Promise<void> {
     if (!points.length) return;
-    await this.client.upsert(this.collection, {
-      wait: true,
-      points: points.map((p) => ({
-        id: p.id,
-        vector: {
-          ...(p.dense ? { dense: p.dense } : {}),
-          sparse: { indices: p.sparse.indices, values: p.sparse.values },
-        },
-        payload: p.payload,
-      })),
-    });
+    for (let i = 0; i < points.length; i += UPSERT_BATCH) {
+      const slice = points.slice(i, i + UPSERT_BATCH);
+      await withRetry(() =>
+        this.client.upsert(this.collection, {
+          wait: false,
+          points: slice.map((p) => ({
+            id: p.id,
+            vector: {
+              ...(p.dense ? { dense: p.dense } : {}),
+              sparse: { indices: p.sparse.indices, values: p.sparse.values },
+            },
+            payload: p.payload,
+          })),
+        }),
+      );
+    }
   }
 
   async count(): Promise<number> {

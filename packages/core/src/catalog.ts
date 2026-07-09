@@ -357,6 +357,38 @@ export class Catalog {
     return { session: s.rows[0], entries: e.rows };
   }
 
+  /**
+   * Page through every entry by ascending id, for rebuilding a vector
+   * collection from the catalog. Keyset pagination (id > cursor) keeps this
+   * O(1) per page regardless of how deep we are.
+   */
+  async entriesAfter(cursor: number, limit: number): Promise<(Entry & { id: number })[]> {
+    const r = await this.pool.query(
+      `SELECT e.id, e.source_type, e.component, e.session_id, e.title, e.body,
+              e.occurred_at, e.source_path, e.source_ref, p.slug
+       FROM entries e JOIN projects p ON p.id = e.project_id
+       WHERE e.id > $1 ORDER BY e.id ASC LIMIT $2`,
+      [cursor, limit],
+    );
+    return r.rows.map((row) => ({
+      id: row.id,
+      projectSlug: row.slug,
+      sourceType: row.source_type,
+      component: row.component ?? undefined,
+      sessionId: row.session_id ?? undefined,
+      title: row.title,
+      body: row.body,
+      occurredAt: row.occurred_at?.toISOString(),
+      sourcePath: row.source_path,
+      sourceRef: row.source_ref ?? undefined,
+    }));
+  }
+
+  async countEntries(): Promise<number> {
+    const r = await this.pool.query('SELECT count(*)::int AS c FROM entries');
+    return r.rows[0].c;
+  }
+
   async getEntries(ids: number[]): Promise<Map<number, any>> {
     if (!ids.length) return new Map();
     const r = await this.pool.query(

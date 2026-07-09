@@ -3,11 +3,13 @@ import { SearchService } from '@kdbscope/core';
 
 /** Minimal fakes — we test the orchestration/degradation logic, not the stores. */
 
-function fakeCatalog(rows: Record<number, any>, ftsHits: any[] = []) {
+function fakeCatalog(rows: Record<number, any>, ftsHits: any[] = [], activeCollection?: string) {
   return {
     getEntries: async (ids: number[]) =>
       new Map(ids.filter((id) => rows[id]).map((id) => [id, rows[id]])),
     ftsSearch: async () => ftsHits,
+    getSetting: async (k: string) =>
+      k === 'active_collection' ? (activeCollection ?? null) : null,
   } as any;
 }
 
@@ -74,6 +76,52 @@ describe('SearchService degradation chain', () => {
     expect(r.mode).toBe('fts');
     expect(r.degraded).toBe(true);
     expect(r.hits).toEqual([ftsHit]);
+  });
+
+  /**
+   * Regression: switching the embedding model changes the vector dimension and
+   * therefore the Qdrant collection. The API used to snapshot the collection at
+   * boot, so after a model switch every dense query failed on a dimension
+   * mismatch and search silently fell back to Postgres FTS.
+   */
+  it('follows the collection the indexer is actively writing', async () => {
+    const vectors = {
+      collection: 'kdbscope_bundled_minilm_384',
+      useCollection(name: string) {
+        this.collection = name;
+      },
+      query: async () => [{ entryId: 1, score: 0.9 }],
+    } as any;
+    const embedder = { name: 'ollama', model: 'nomic', dim: 768, embed: async () => [[1]] };
+    const catalog = fakeCatalog({ 1: row(1) }, [], 'kdbscope_ollama_nomic_768');
+
+    const s = new SearchService(catalog, vectors, embedder);
+    await s.search('q');
+
+    expect(vectors.collection).toBe('kdbscope_ollama_nomic_768');
+  });
+
+  it('keeps serving on the current collection when the catalog is unreachable', async () => {
+    const vectors = {
+      collection: 'current',
+      useCollection(name: string) {
+        this.collection = name;
+      },
+      query: async () => [{ entryId: 1, score: 0.5 }],
+    } as any;
+    const catalog = {
+      getEntries: async () => new Map([[1, row(1)]]),
+      ftsSearch: async () => [],
+      getSetting: async () => {
+        throw new Error('db down');
+      },
+    } as any;
+
+    const s = new SearchService(catalog, vectors, null);
+    const r = await s.search('q');
+
+    expect(vectors.collection).toBe('current');
+    expect(r.hits).toHaveLength(1);
   });
 
   it('drops stale qdrant ids missing from the catalog', async () => {

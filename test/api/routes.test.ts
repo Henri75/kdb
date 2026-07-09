@@ -21,7 +21,7 @@ function makeDeps(overrides: Partial<ApiDeps> = {}): ApiDeps {
     ask: { ask: async () => ({ answer: '42 [1]', sources: [], model: 'm', degraded: false }) } as any,
     enqueueScan: vi.fn(async () => 1),
     vectorCount: async () => 123,
-    meta: { embedder: 'ollama/nomic-embed-text', collection: 'kdbscope_x' },
+    meta: () => ({ embedder: 'ollama/nomic-embed-text', collection: 'kdbscope_x' }),
     ...overrides,
   };
 }
@@ -72,6 +72,43 @@ describe('api routes', () => {
       headers: { 'content-type': 'application/json' },
     });
     expect(await res.json()).toMatchObject({ answer: '42 [1]' });
+  });
+
+  it('POST /api/ask/stream requires question', async () => {
+    const res = await buildApp(makeDeps()).request('/api/ask/stream', {
+      method: 'POST',
+      body: JSON.stringify({}),
+      headers: { 'content-type': 'application/json' },
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('POST /api/ask/stream emits SSE frames with sources then deltas then done', async () => {
+    async function* fakeStream() {
+      yield { type: 'sources', sources: [{ n: 1, entryId: 1 }] };
+      yield { type: 'delta', text: 'Hello' };
+      yield { type: 'done', model: 'm', degraded: false };
+    }
+    const deps = makeDeps({ ask: { askStream: () => fakeStream() } as any });
+    const res = await buildApp(deps).request('/api/ask/stream', {
+      method: 'POST',
+      body: JSON.stringify({ question: 'q' }),
+      headers: { 'content-type': 'application/json' },
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/event-stream');
+    // nginx would otherwise buffer the whole answer and defeat streaming.
+    expect(res.headers.get('x-accel-buffering')).toBe('no');
+
+    const body = await res.text();
+    const events = body
+      .split('\n\n')
+      .filter((r) => r.startsWith('data:'))
+      .map((r) => JSON.parse(r.slice(5).trim()));
+
+    expect(events.map((e) => e.type)).toEqual(['sources', 'delta', 'done']);
+    expect(events[1].text).toBe('Hello');
   });
 
   it('GET /api/sessions/:id 404s on unknown session', async () => {

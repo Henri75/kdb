@@ -1,3 +1,4 @@
+import { HttpError } from '../retry.js';
 import type { EmbeddingProvider } from './types.js';
 
 /**
@@ -20,7 +21,7 @@ export async function createOpenAICompatProvider(opts: {
       body: JSON.stringify({ model: opts.model, input: texts }),
       signal: AbortSignal.timeout(120_000),
     });
-    if (!r.ok) throw new Error(`${opts.name} embeddings failed: ${r.status} ${await r.text()}`);
+    if (!r.ok) throw new HttpError(`${opts.name} embeddings failed: ${await r.text()}`, r.status);
     const data = (await r.json()) as { data: { index: number; embedding: number[] }[] };
     return data.data.sort((a, b) => a.index - b.index).map((d) => d.embedding);
   };

@@ -1,5 +1,5 @@
 import type { AppConfig } from './config.js';
-import { chatComplete } from './llm.js';
+import { chatComplete, chatStream, type ChatMessage } from './llm.js';
 import type { SearchService } from './search.js';
 import type { Catalog } from './catalog.js';
 import type { AskResult, AskSource, SearchFilters, SearchHit } from './types.js';
@@ -16,6 +16,9 @@ const SYSTEM_PROMPT =
   'claim. If the context is insufficient, say exactly what is missing. Be concrete: ' +
   'name components, dates, files and root causes. Answer in the language of the question.';
 
+const NO_MATCH =
+  'No indexed content matched this question. Try a broader query or trigger a reindex.';
+
 export function buildAskPrompt(question: string, hits: SearchHit[], bodies: Map<number, string>): string {
   const blocks = hits
     .map((h, i) => {
@@ -27,6 +30,18 @@ export function buildAskPrompt(question: string, hits: SearchHit[], bodies: Map<
   return `Context blocks:\n\n${blocks}\n\nQuestion: ${question}`;
 }
 
+/** Events emitted by the streaming Ask pipeline, in order. */
+export type AskEvent =
+  | { type: 'sources'; sources: AskSource[] }
+  | { type: 'delta'; text: string }
+  | { type: 'done'; model: string; degraded: boolean }
+  | { type: 'error'; message: string };
+
+interface Prepared {
+  sources: AskSource[];
+  messages: ChatMessage[] | null;
+}
+
 export class AskService {
   constructor(
     private searchService: SearchService,
@@ -34,7 +49,8 @@ export class AskService {
     private llmConfig: AppConfig['llm'],
   ) {}
 
-  async ask(question: string, filters: SearchFilters = {}, k = 12): Promise<AskResult> {
+  /** Shared retrieval: both ask() and askStream() build their prompt here. */
+  private async prepare(question: string, filters: SearchFilters, k: number): Promise<Prepared> {
     const { hits } = await this.searchService.search(question, filters, k);
     const sources: AskSource[] = hits.map((h, i) => ({
       n: i + 1,
@@ -45,26 +61,28 @@ export class AskService {
       sourcePath: h.sourcePath,
       occurredAt: h.occurredAt,
     }));
-
-    if (!hits.length) {
-      return {
-        answer: 'No indexed content matched this question. Try a broader query or trigger a reindex.',
-        sources: [],
-        model: this.llmConfig.model,
-        degraded: false,
-      };
-    }
+    if (!hits.length) return { sources: [], messages: null };
 
     const rows = await this.catalog.getEntries(hits.map((h) => h.entryId));
     const bodies = new Map<number, string>(
       [...rows.entries()].map(([id, row]) => [id, String(row.body)]),
     );
-
-    try {
-      const answer = await chatComplete(this.llmConfig, [
+    return {
+      sources,
+      messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: buildAskPrompt(question, hits, bodies) },
-      ]);
+      ],
+    };
+  }
+
+  async ask(question: string, filters: SearchFilters = {}, k = 12): Promise<AskResult> {
+    const { sources, messages } = await this.prepare(question, filters, k);
+    if (!messages) {
+      return { answer: NO_MATCH, sources: [], model: this.llmConfig.model, degraded: false };
+    }
+    try {
+      const answer = await chatComplete(this.llmConfig, messages);
       return { answer, sources, model: this.llmConfig.model, degraded: false };
     } catch (e) {
       // LLM down: still useful — return the retrieved sources with an explanation.
@@ -76,6 +94,47 @@ export class AskService {
         model: this.llmConfig.model,
         degraded: true,
       };
+    }
+  }
+
+  /**
+   * Streaming variant. Sources are emitted first so the UI can render
+   * citations before any prose arrives, then answer deltas, then `done`.
+   */
+  async *askStream(
+    question: string,
+    filters: SearchFilters = {},
+    k = 12,
+  ): AsyncGenerator<AskEvent, void, unknown> {
+    let prepared: Prepared;
+    try {
+      prepared = await this.prepare(question, filters, k);
+    } catch (e) {
+      yield { type: 'error', message: (e as Error).message };
+      return;
+    }
+
+    yield { type: 'sources', sources: prepared.sources };
+
+    if (!prepared.messages) {
+      yield { type: 'delta', text: NO_MATCH };
+      yield { type: 'done', model: this.llmConfig.model, degraded: false };
+      return;
+    }
+
+    try {
+      for await (const delta of chatStream(this.llmConfig, prepared.messages)) {
+        yield { type: 'delta', text: delta };
+      }
+      yield { type: 'done', model: this.llmConfig.model, degraded: false };
+    } catch (e) {
+      yield {
+        type: 'delta',
+        text:
+          `\n\n_LLM unavailable (${(e as Error).message.slice(0, 200)}). ` +
+          'The sources above are the most relevant indexed results._',
+      };
+      yield { type: 'done', model: this.llmConfig.model, degraded: true };
     }
   }
 }

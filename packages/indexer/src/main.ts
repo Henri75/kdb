@@ -8,7 +8,7 @@ import {
   createEmbedder,
   getConfig,
 } from '@kdbscope/core';
-import { processScanJob, type PipelineDeps, type ScanJobData } from './pipeline.js';
+import { backfillVectors, processScanJob, type PipelineDeps, type ScanJobData } from './pipeline.js';
 import { SCAN_QUEUE, scheduleScans, withSchedulerLock } from './scheduler.js';
 
 /**
@@ -38,6 +38,25 @@ async function main() {
   const connection = new Redis(cfg.redisUrl, { maxRetriesPerRequest: null });
   const queue = new Queue<ScanJobData>(SCAN_QUEUE, { connection });
 
+  // A populated catalog with an empty collection means the embedding model
+  // changed (the dimension is part of the collection name). Entries are never
+  // re-inserted, so their vectors must be backfilled from Postgres. Runs in
+  // the background: the previous collection keeps serving search meanwhile.
+  const [vectorPoints, entryCount] = await Promise.all([vectors.count(), catalog.countEntries()]);
+  if (entryCount > 0 && vectorPoints === 0) {
+    console.log(
+      `[indexer] ${vectors.collection} is empty but the catalog holds ${entryCount} entries — ` +
+        're-embedding from the catalog (search stays up on the old collection)',
+    );
+    void backfillVectors(deps, {
+      onPage: (done, total) => {
+        if (done % 2000 < 200) console.log(`[indexer] re-embed ${done}/${total} entries`);
+      },
+    })
+      .then((n) => console.log(`[indexer] re-embed complete: ${n} entries`))
+      .catch((e) => console.error('[indexer] re-embed failed:', e));
+  }
+
   const worker = new Worker<ScanJobData>(
     SCAN_QUEUE,
     async (job) => {
@@ -53,7 +72,11 @@ async function main() {
         return { enqueued };
       }
       const t0 = Date.now();
-      const { chunksIndexed } = await processScanJob(deps, job.data);
+      // updateProgress renews the job lock; without it, files that take longer
+      // than lockDuration trip BullMQ's stall watchdog and get re-queued.
+      const { chunksIndexed } = await processScanJob(deps, job.data, async ({ file, chunks }) => {
+        await job.updateProgress({ file, chunks }).catch(() => {});
+      });
       if (chunksIndexed > 0) {
         console.log(
           `[indexer] ${job.data.projectSlug}/${job.data.sourceType}: +${chunksIndexed} chunks in ${Date.now() - t0}ms`,
@@ -61,7 +84,15 @@ async function main() {
       }
       return { chunksIndexed };
     },
-    { connection: new Redis(cfg.redisUrl, { maxRetriesPerRequest: null }), concurrency: cfg.workerConcurrency },
+    {
+      connection: new Redis(cfg.redisUrl, { maxRetriesPerRequest: null }),
+      concurrency: cfg.workerConcurrency,
+      // Embedding a batch on CPU can take a while; give the lock room and let
+      // updateProgress() renew it. Defaults (30s/1) are tuned for fast jobs.
+      lockDuration: 120_000,
+      stalledInterval: 120_000,
+      maxStalledCount: 3,
+    },
   );
   worker.on('failed', (job, err) => {
     console.error(`[indexer] job ${job?.id} failed: ${err.message}`);

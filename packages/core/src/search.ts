@@ -8,7 +8,12 @@ import type { SearchFilters, SearchHit, SearchResult } from './types.js';
  * Search orchestration with the graceful-degradation chain:
  *   hybrid (dense+sparse RRF) → sparse-only → Postgres FTS.
  */
+/** How long the API trusts its cached view of the indexer's active collection. */
+const COLLECTION_TTL_MS = 15_000;
+
 export class SearchService {
+  private collectionCheckedAt = 0;
+
   constructor(
     private catalog: Catalog,
     private vectors: VectorStore,
@@ -20,8 +25,28 @@ export class SearchService {
     this.embedder = e;
   }
 
+  /**
+   * Follow the collection the indexer is currently writing.
+   *
+   * Changing the embedding model changes the vector dimension, and therefore
+   * the collection. Without this, the API keeps querying the collection it saw
+   * at boot: every dense query then fails on a dimension mismatch and search
+   * silently degrades to the Postgres fallback.
+   */
+  private async syncCollection(now: number): Promise<void> {
+    if (now - this.collectionCheckedAt < COLLECTION_TTL_MS) return;
+    this.collectionCheckedAt = now;
+    try {
+      const active = await this.catalog.getSetting('active_collection');
+      if (active && active !== this.vectors.collection) this.vectors.useCollection(active);
+    } catch {
+      // Keep serving with the current collection if the catalog is unreachable.
+    }
+  }
+
   async search(q: string, filters: SearchFilters = {}, limit = 20): Promise<SearchResult> {
     const t0 = Date.now();
+    await this.syncCollection(t0);
     const sparse = sparseVector(q);
 
     let dense: number[] | undefined;

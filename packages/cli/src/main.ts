@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
-import { get, post, qs } from './api.js';
+import { get, post, postStream, qs } from './api.js';
 import { SOURCE_BADGE, bold, cyan, date, dim, green, hr, magenta, red, yellow } from './format.js';
 
 /**
@@ -53,17 +53,38 @@ program
   .argument('<question...>')
   .option('-p, --project <slug>')
   .option('-k, --k <n>', 'context blocks', '12')
+  .option('--no-stream', 'wait for the whole answer instead of streaming it')
   .description('ask a question, get a cited answer synthesized by the LLM')
   .action(async (words, o) => {
-    const r = await post('/api/ask', { question: words.join(' '), project: o.project, k: Number(o.k) });
-    out(r, () => {
-      if (r.degraded) console.log(yellow('⚠ LLM unavailable — sources only\n'));
-      console.log(r.answer);
+    const body = { question: words.join(' '), project: o.project, k: Number(o.k) };
+    const printSources = (sources: any[]) => {
       console.log(`\n${hr()}\n${dim('sources:')}`);
-      for (const s of r.sources) {
+      for (const s of sources) {
         console.log(`${dim(`[${s.n}]`)} ${cyan(s.projectSlug)} ${s.title.slice(0, 80)} ${dim(date(s.occurredAt))}`);
       }
-    });
+    };
+
+    // --json must stay one valid document, so buffer rather than stream it.
+    if (isJson() || o.stream === false) {
+      const r = await post('/api/ask', body);
+      out(r, () => {
+        if (r.degraded) console.log(yellow('⚠ LLM unavailable — sources only\n'));
+        console.log(r.answer);
+        printSources(r.sources);
+      });
+      return;
+    }
+
+    let sources: any[] = [];
+    let degraded = false;
+    for await (const ev of postStream('/api/ask/stream', body)) {
+      if (ev.type === 'sources') sources = ev.sources;
+      else if (ev.type === 'delta') process.stdout.write(ev.text);
+      else if (ev.type === 'done') degraded = ev.degraded;
+      else if (ev.type === 'error') throw new Error(ev.message);
+    }
+    if (degraded) console.log(yellow('\n\n⚠ LLM unavailable — sources only'));
+    printSources(sources);
   });
 
 program

@@ -11,6 +11,9 @@ x-node-common: &node-common
     REDIS_URL: redis://redis:6379
     QDRANT_URL: http://qdrant:6333
     KDBSCOPE_API_URL: http://api:8710
+    # Host-side Ollama (preferred embedder). Falls back to the bundled CPU
+    # model with a loud warning when unreachable.
+    OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
   extra_hosts:
     - 'host.docker.internal:host-gateway'
 

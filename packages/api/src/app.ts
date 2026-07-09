@@ -14,7 +14,8 @@ export interface ApiDeps {
   enqueueScan: (opts: { project?: string; full?: boolean }) => Promise<number>;
   /** Point count of the active Qdrant collection (0 when unavailable). */
   vectorCount: () => Promise<number>;
-  meta: { embedder: string; collection: string };
+  /** Read at request time — the active collection can change at runtime. */
+  meta: () => { embedder: string; collection: string };
 }
 
 export function buildApp(deps: ApiDeps): Hono {
@@ -25,7 +26,7 @@ export function buildApp(deps: ApiDeps): Hono {
 
   app.get('/api/stats', async (c) => {
     const [stats, chunks] = await Promise.all([deps.catalog.stats(), deps.vectorCount()]);
-    return c.json({ ...stats, chunks, ...deps.meta });
+    return c.json({ ...stats, chunks, ...deps.meta() });
   });
 
   app.get('/api/search', async (c) => {
@@ -55,6 +56,46 @@ export function buildApp(deps: ApiDeps): Hono {
       Math.min(Number(body.k ?? 12), 30),
     );
     return c.json(result);
+  });
+
+  /**
+   * Streaming Ask over SSE. Emits `sources`, then a run of `delta` events,
+   * then `done`. Errors after headers are sent surface as a final `done`
+   * with degraded: true (the generator handles it), so the client always
+   * terminates cleanly.
+   */
+  app.post('/api/ask/stream', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const question = typeof body.question === 'string' ? body.question.trim() : '';
+    if (!question) return c.json({ error: 'question is required' }, 400);
+
+    const events = deps.ask.askStream(
+      question,
+      { project: body.project, sourceType: body.source, component: body.component },
+      Math.min(Number(body.k ?? 12), 30),
+    );
+
+    const stream = new ReadableStream({
+      async pull(controller) {
+        const { value, done } = await events.next();
+        if (done) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(value)}\n\n`));
+      },
+      cancel: () => void events.return?.(undefined),
+    });
+
+    return new Response(stream, {
+      headers: {
+        'content-type': 'text/event-stream; charset=utf-8',
+        'cache-control': 'no-cache, no-transform',
+        connection: 'keep-alive',
+        // nginx buffers proxied responses by default, which defeats streaming.
+        'x-accel-buffering': 'no',
+      },
+    });
   });
 
   app.get('/api/projects', async (c) => c.json(await deps.catalog.listProjects()));

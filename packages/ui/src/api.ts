@@ -35,9 +35,58 @@ export function qs(params: Record<string, unknown>): string {
   return s ? `?${s}` : '';
 }
 
+/** Events emitted by POST /api/ask/stream (mirrors core's AskEvent). */
+export type AskEvent =
+  | { type: 'sources'; sources: AskResult['sources'] }
+  | { type: 'delta'; text: string }
+  | { type: 'done'; model: string; degraded: boolean }
+  | { type: 'error'; message: string };
+
+/**
+ * Consume the Ask SSE stream. Yields each event as it arrives so the caller
+ * can paint sources immediately and append answer text progressively.
+ */
+export async function* askStream(
+  body: Record<string, unknown>,
+  signal?: AbortSignal,
+): AsyncGenerator<AskEvent, void, unknown> {
+  const res = await fetch('/api/ask/stream', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+    signal,
+  });
+  if (!res.ok || !res.body) throw new Error(`${res.status}: ${await res.text()}`);
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let sep: number;
+      while ((sep = buffer.indexOf('\n\n')) !== -1) {
+        const record = buffer.slice(0, sep);
+        buffer = buffer.slice(sep + 2);
+        if (!record.startsWith('data:')) continue;
+        try {
+          yield JSON.parse(record.slice(5).trim()) as AskEvent;
+        } catch {
+          // Ignore a malformed frame rather than aborting the answer.
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 export const api = {
   search: (params: Record<string, unknown>) => get<SearchResult>(`/api/search${qs(params)}`),
   ask: (body: Record<string, unknown>) => post<AskResult>('/api/ask', body),
+  askStream,
   projects: () => get<ProjectRow[]>('/api/projects'),
   timeline: (slug: string, params: Record<string, unknown> = {}) =>
     get<{ items: TimelineItem[] }>(`/api/projects/${slug}/timeline${qs(params)}`),

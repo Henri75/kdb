@@ -1,15 +1,17 @@
 import type { AppConfig } from '../config.js';
 import type { EmbeddingProvider } from './types.js';
 import { createBundledProvider } from './bundled.js';
-import { createOllamaProvider, ollamaAvailable } from './ollama.js';
+import { createOllamaProvider, ollamaAvailable, ollamaHasModel, ollamaPull } from './ollama.js';
 import { createOpenAICompatProvider } from './openaiCompat.js';
 
 export type { EmbeddingProvider } from './types.js';
-export { ollamaAvailable } from './ollama.js';
+export { ollamaAvailable, ollamaHasModel, ollamaPull } from './ollama.js';
 
 /**
- * Provider selection (design §5.5): explicit provider wins; 'auto' probes
- * Ollama and falls back to the bundled CPU model.
+ * Provider selection. `auto` prefers Ollama — it is several times faster than
+ * the bundled CPU model and produces better vectors — and will pull the model
+ * on first boot. Every fallback is logged: a silent downgrade to the CPU
+ * embedder costs hours on a large index and used to be invisible.
  */
 export async function createEmbedder(cfg: AppConfig['embeddings']): Promise<EmbeddingProvider> {
   switch (cfg.provider) {
@@ -33,15 +35,41 @@ export async function createEmbedder(cfg: AppConfig['embeddings']): Promise<Embe
         apiKey: cfg.apiKey,
       });
     case 'auto':
-    default: {
-      if (await ollamaAvailable(cfg.ollamaUrl)) {
-        try {
-          return await createOllamaProvider(cfg.ollamaUrl, cfg.model);
-        } catch {
-          // model missing etc. — fall through to bundled
-        }
-      }
+    default:
+      return autoSelect(cfg);
+  }
+}
+
+async function autoSelect(cfg: AppConfig['embeddings']): Promise<EmbeddingProvider> {
+  if (!(await ollamaAvailable(cfg.ollamaUrl))) {
+    console.warn(
+      `[embeddings] Ollama unreachable at ${cfg.ollamaUrl} — falling back to the bundled ` +
+        'CPU model (slower). Start Ollama for a large speedup.',
+    );
+    return createBundledProvider();
+  }
+
+  if (!(await ollamaHasModel(cfg.ollamaUrl, cfg.model))) {
+    console.log(`[embeddings] pulling ${cfg.model} into Ollama (first run, may take a while)…`);
+    try {
+      await ollamaPull(cfg.ollamaUrl, cfg.model);
+      console.log(`[embeddings] pulled ${cfg.model}`);
+    } catch (e) {
+      console.warn(
+        `[embeddings] could not pull ${cfg.model} (${(e as Error).message}) — ` +
+          'falling back to the bundled CPU model.',
+      );
       return createBundledProvider();
     }
+  }
+
+  try {
+    return await createOllamaProvider(cfg.ollamaUrl, cfg.model);
+  } catch (e) {
+    console.warn(
+      `[embeddings] Ollama present but unusable (${(e as Error).message}) — ` +
+        'falling back to the bundled CPU model.',
+    );
+    return createBundledProvider();
   }
 }

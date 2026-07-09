@@ -43,34 +43,69 @@ export function SearchView({
   const [mode, setMode] = useState<'search' | 'ask'>('search');
   const [result, setResult] = useState<SearchResult | null>(null);
   const [askResult, setAskResult] = useState<AskResult | null>(null);
+  const [streaming, setStreaming] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const seq = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
 
   const run = useCallback(
     async (kind: 'search' | 'ask') => {
       if (!q.trim()) return;
       const mySeq = ++seq.current;
-      setLoading(true);
+      // Cancel an in-flight stream so the server stops generating for a
+      // question nobody is reading any more.
+      abortRef.current?.abort();
       setError('');
       setMode(kind);
-      try {
-        if (kind === 'search') {
+
+      if (kind === 'search') {
+        setLoading(true);
+        try {
           const r = await api.search({ q, project, source, limit: 30 });
           if (seq.current === mySeq) setResult(r);
-        } else {
-          setAskResult(null);
-          const r = await api.ask({ question: q, project: project || undefined });
-          if (seq.current === mySeq) setAskResult(r);
+        } catch (e) {
+          if (seq.current === mySeq) setError((e as Error).message);
+        } finally {
+          if (seq.current === mySeq) setLoading(false);
+        }
+        return;
+      }
+
+      const controller = new AbortController();
+      abortRef.current = controller;
+      setAskResult({ answer: '', sources: [], model: '', degraded: false });
+      setStreaming(true);
+      try {
+        const stream = api.askStream(
+          { question: q, project: project || undefined },
+          controller.signal,
+        );
+        for await (const ev of stream) {
+          if (seq.current !== mySeq) return; // superseded by a newer question
+          if (ev.type === 'sources') {
+            setAskResult((prev) => ({ ...prev!, sources: ev.sources }));
+          } else if (ev.type === 'delta') {
+            setAskResult((prev) => ({ ...prev!, answer: prev!.answer + ev.text }));
+          } else if (ev.type === 'done') {
+            setAskResult((prev) => ({ ...prev!, model: ev.model, degraded: ev.degraded }));
+          } else if (ev.type === 'error') {
+            setError(ev.message);
+          }
         }
       } catch (e) {
-        if (seq.current === mySeq) setError((e as Error).message);
+        if (seq.current === mySeq && (e as Error).name !== 'AbortError') {
+          setError((e as Error).message);
+        }
       } finally {
-        if (seq.current === mySeq) setLoading(false);
+        if (seq.current === mySeq) setStreaming(false);
       }
     },
     [q, project, source],
   );
+
+  // Abort any in-flight stream when the view unmounts.
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   useEffect(() => {
     // Re-run an existing search when the project filter changes.
@@ -124,17 +159,30 @@ export function SearchView({
       </div>
 
       {loading && <Spinner />}
-      {error && <p className="text-report font-mono text-sm py-4" style={{ color: 'var(--color-report)' }}>{error}</p>}
+      {error && <p className="font-mono text-sm py-4" style={{ color: 'var(--color-report)' }}>{error}</p>}
 
-      {!loading && mode === 'ask' && askResult && (
+      {mode === 'ask' && askResult && (
         <div className="mt-6 rise">
           {askResult.degraded && (
             <p className="font-mono text-xs mb-3" style={{ color: 'var(--color-report)' }}>
               ⚠ LLM unavailable — showing retrieved sources only
             </p>
           )}
-          <div className="bg-panel border border-line rounded-md p-5">
-            <Cited text={askResult.answer} />
+          <div className="bg-panel border border-line rounded-md p-5 min-h-[3.5rem]">
+            {askResult.answer ? (
+              <Cited text={askResult.answer} />
+            ) : (
+              <span className="font-mono text-sm text-faint">
+                {streaming ? 'reading sources…' : ''}
+              </span>
+            )}
+            {streaming && askResult.answer && (
+              <span
+                className="inline-block w-[7px] h-[15px] translate-y-[2px] ml-0.5 animate-pulse"
+                style={{ background: 'var(--color-kdb)' }}
+                aria-hidden
+              />
+            )}
           </div>
           <div className="mt-4 space-y-1.5">
             {askResult.sources.map((s) => (

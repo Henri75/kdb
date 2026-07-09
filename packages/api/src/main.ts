@@ -48,17 +48,21 @@ async function main() {
     search,
     ask,
     vectorCount: () => vectors.count(),
-    meta: {
+    // Read live: the indexer may switch collections when the model changes.
+    meta: () => ({
       embedder: embedder ? `${embedder.name}/${embedder.model}` : 'none',
       collection: vectors.collection,
-    },
+    }),
     enqueueScan: async ({ project, full }) => {
       // The indexer's scheduler tick owns discovery; we piggyback by writing
       // a trigger job it treats identically (same queue, discovery job).
+      // BullMQ rejects ':' in custom ids; the timestamp keeps repeat triggers
+      // distinct rather than collapsing onto one pending job.
+      const safe = (s: string) => s.replace(/[^A-Za-z0-9_-]/g, '-');
       await queue.add(
         'manual-reindex',
         { trigger: 'manual', project, full },
-        { jobId: `manual:${project ?? 'all'}:${full ? 'full' : 'inc'}:${Date.now()}` },
+        { jobId: `manual--${safe(project ?? 'all')}--${full ? 'full' : 'inc'}--${Date.now()}` },
       );
       return 1;
     },

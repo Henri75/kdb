@@ -17,8 +17,15 @@ import {
   parseSessionLog,
   sparseVector,
 } from '@kdbscope/core';
+import { withRetry } from '@kdbscope/core';
 import type { EmbeddingProvider, Entry, InsertedEntry } from '@kdbscope/core';
 import { listDocFiles, listKdbFiles, listSessionFiles } from './scanners.js';
+
+/**
+ * Called after every embedded batch. Renewing the BullMQ job lock here is what
+ * keeps long files from tripping the stall watchdog.
+ */
+export type ProgressFn = (info: { file: string; chunks: number }) => void | Promise<void>;
 
 const execFileAsync = promisify(execFile);
 
@@ -42,17 +49,49 @@ export interface ScanJobData {
 
 const EMBED_BATCH = 32;
 
-/** Chunk + embed + upsert freshly inserted entries into Qdrant. */
-export async function indexEntries(deps: PipelineDeps, inserted: InsertedEntry[]): Promise<number> {
-  type PendingChunk = { entryId: number; entry: Entry; seq: number; text: string };
-  const pending: PendingChunk[] = [];
+interface PendingChunk {
+  entryId: number;
+  entry: Entry;
+  seq: number;
+  text: string;
+}
+
+/**
+ * Yield chunks in fixed-size batches without materializing every chunk of a
+ * file first — a single 38MB transcript produces tens of thousands of chunks.
+ */
+function* batchChunks(inserted: InsertedEntry[]): Generator<PendingChunk[]> {
+  let batch: PendingChunk[] = [];
   for (const { id, entry } of inserted) {
     const chunks = chunk(`${entry.title}\n\n${entry.body}`);
-    chunks.forEach((text, seq) => pending.push({ entryId: id, entry, seq, text }));
+    for (const [seq, text] of chunks.entries()) {
+      batch.push({ entryId: id, entry, seq, text });
+      if (batch.length === EMBED_BATCH) {
+        yield batch;
+        batch = [];
+      }
+    }
   }
-  for (let i = 0; i < pending.length; i += EMBED_BATCH) {
-    const batch = pending.slice(i, i + EMBED_BATCH);
-    const dense = await deps.embedder.embed(batch.map((b) => b.text));
+  if (batch.length) yield batch;
+}
+
+/**
+ * Chunk + embed + upsert freshly inserted entries into Qdrant.
+ * `onProgress` lets the caller renew its BullMQ job lock during long files.
+ */
+export async function indexEntries(
+  deps: PipelineDeps,
+  inserted: InsertedEntry[],
+  onProgress?: (chunksDone: number) => void | Promise<void>,
+): Promise<number> {
+  let done = 0;
+  for (const batch of batchChunks(inserted)) {
+    // Local embedders (Ollama) drop connections under sustained load; give
+    // them room to recover rather than failing the whole file.
+    const dense = await withRetry(() => deps.embedder.embed(batch.map((b) => b.text)), {
+      attempts: 5,
+      baseDelayMs: 1000,
+    });
     await deps.vectors.upsert(
       batch.map((b, j) => ({
         id: deterministicUuid(b.entry.projectSlug, b.entry.sourcePath, String(b.entryId), String(b.seq)),
@@ -68,8 +107,10 @@ export async function indexEntries(deps: PipelineDeps, inserted: InsertedEntry[]
         },
       })),
     );
+    done += batch.length;
+    await onProgress?.(done);
   }
-  return pending.length;
+  return done;
 }
 
 interface FileStat {
@@ -102,7 +143,12 @@ export function readTailLines(path: string, offset: number): { lines: string[]; 
   }
 }
 
-async function scanKdb(deps: PipelineDeps, job: ScanJobData, projectId: number): Promise<number> {
+async function scanKdb(
+  deps: PipelineDeps,
+  job: ScanJobData,
+  projectId: number,
+  progress?: ProgressFn,
+): Promise<number> {
   let indexed = 0;
   for (const f of listKdbFiles(job.rootPath)) {
     try {
@@ -125,7 +171,7 @@ async function scanKdb(deps: PipelineDeps, job: ScanJobData, projectId: number):
           }).map((e) => ({ ...e, sourceType: 'kdb_report' as const }));
       }
       const inserted = await deps.catalog.insertEntries(projectId, entries);
-      indexed += await indexEntries(deps, inserted);
+      indexed += await indexEntries(deps, inserted, (c) => progress?.({ file: f.path, chunks: c }));
       await deps.catalog.setScanState(projectId, f.sourceType, f.path, {
         mtimeMs: Math.trunc(stat.mtimeMs), size: stat.size, byteOffset: stat.size,
       });
@@ -136,10 +182,28 @@ async function scanKdb(deps: PipelineDeps, job: ScanJobData, projectId: number):
   return indexed;
 }
 
-async function scanClaude(deps: PipelineDeps, job: ScanJobData, projectId: number): Promise<number> {
+async function scanClaude(
+  deps: PipelineDeps,
+  job: ScanJobData,
+  projectId: number,
+  progress?: ProgressFn,
+): Promise<number> {
   let indexed = 0;
   for (const dir of job.claudeDirs ?? []) {
-    for (const path of listSessionFiles(dir)) {
+    // Newest transcripts first: a full pass over ~10k files takes hours, and
+    // recent history is what anyone actually asks about.
+    const paths = listSessionFiles(dir)
+      .map((p) => {
+        try {
+          return { p, mtime: statSync(p).mtimeMs };
+        } catch {
+          return { p, mtime: 0 };
+        }
+      })
+      .sort((a, b) => b.mtime - a.mtime)
+      .map((x) => x.p);
+
+    for (const path of paths) {
       try {
         const stat = statSync(path);
         const state = job.full ? null : await deps.catalog.getScanState(projectId, 'claude_session', path);
@@ -158,7 +222,7 @@ async function scanClaude(deps: PipelineDeps, job: ScanJobData, projectId: numbe
           projectSlug: job.projectSlug, sourcePath: path, sessionId,
         });
         const inserted = await deps.catalog.insertEntries(projectId, entries);
-        indexed += await indexEntries(deps, inserted);
+        indexed += await indexEntries(deps, inserted, (c) => progress?.({ file: path, chunks: c }));
 
         // Tail reads only see new events — merge with the stored session row.
         const prev = await deps.catalog.getSessionRow(sessionId);
@@ -183,7 +247,12 @@ async function scanClaude(deps: PipelineDeps, job: ScanJobData, projectId: numbe
   return indexed;
 }
 
-async function scanGit(deps: PipelineDeps, job: ScanJobData, projectId: number): Promise<number> {
+async function scanGit(
+  deps: PipelineDeps,
+  job: ScanJobData,
+  projectId: number,
+  progress?: ProgressFn,
+): Promise<number> {
   const state = job.full ? null : await deps.catalog.getScanState(projectId, 'git_commit', job.rootPath);
   const range = state?.ref ? `${state.ref}..HEAD` : 'HEAD';
   let stdout = '';
@@ -204,7 +273,9 @@ async function scanGit(deps: PipelineDeps, job: ScanJobData, projectId: number):
   }
   const entries = parseGitLog(stdout, { projectSlug: job.projectSlug, repoPath: job.rootPath });
   const inserted = await deps.catalog.insertEntries(projectId, entries);
-  const indexed = await indexEntries(deps, inserted);
+  const indexed = await indexEntries(deps, inserted, (c) =>
+    progress?.({ file: job.rootPath, chunks: c }),
+  );
   const newHead = entries[0]?.sourceRef ?? state?.ref;
   await deps.catalog.setScanState(projectId, 'git_commit', job.rootPath, {
     mtimeMs: 0, size: 0, byteOffset: 0, ref: newHead,
@@ -212,7 +283,12 @@ async function scanGit(deps: PipelineDeps, job: ScanJobData, projectId: number):
   return indexed;
 }
 
-async function scanDocs(deps: PipelineDeps, job: ScanJobData, projectId: number): Promise<number> {
+async function scanDocs(
+  deps: PipelineDeps,
+  job: ScanJobData,
+  projectId: number,
+  progress?: ProgressFn,
+): Promise<number> {
   let indexed = 0;
   for (const path of listDocFiles(job.rootPath)) {
     try {
@@ -225,7 +301,7 @@ async function scanDocs(deps: PipelineDeps, job: ScanJobData, projectId: number)
         modifiedAt: new Date(stat.mtimeMs).toISOString(),
       });
       const inserted = await deps.catalog.insertEntries(projectId, entries);
-      indexed += await indexEntries(deps, inserted);
+      indexed += await indexEntries(deps, inserted, (c) => progress?.({ file: path, chunks: c }));
       await deps.catalog.setScanState(projectId, 'doc', path, {
         mtimeMs: Math.trunc(stat.mtimeMs), size: stat.size, byteOffset: stat.size,
       });
@@ -236,7 +312,48 @@ async function scanDocs(deps: PipelineDeps, job: ScanJobData, projectId: number)
   return indexed;
 }
 
-export async function processScanJob(deps: PipelineDeps, job: ScanJobData): Promise<{ chunksIndexed: number }> {
+/**
+ * Rebuild the active Qdrant collection from the catalog.
+ *
+ * Needed after an embedding-model switch: the collection name encodes the
+ * vector dimension, so a new model starts from an empty collection. Entries
+ * already in Postgres are never re-inserted (dedup_key), so a normal scan
+ * would never re-emit them — the vectors must be backfilled from the catalog
+ * rather than by re-parsing 11GB of source files.
+ */
+export async function backfillVectors(
+  deps: PipelineDeps,
+  opts: { pageSize?: number; onPage?: (done: number, total: number) => void | Promise<void> } = {},
+): Promise<number> {
+  const pageSize = opts.pageSize ?? 200;
+  const total = await deps.catalog.countEntries();
+  let cursor = 0;
+  let done = 0;
+
+  for (;;) {
+    const rows = await deps.catalog.entriesAfter(cursor, pageSize);
+    if (!rows.length) break;
+    cursor = rows[rows.length - 1]!.id;
+
+    const inserted: InsertedEntry[] = rows.map((r) => ({ id: r.id, entry: r }));
+    try {
+      await indexEntries(deps, inserted);
+    } catch (e) {
+      // A page that fails even after retries must not abandon hours of work;
+      // record it and keep going. The next full backfill picks it up.
+      await deps.catalog.logError(null, `entries>${cursor}`, 'backfill', (e as Error).message);
+    }
+    done += rows.length;
+    await opts.onPage?.(done, total);
+  }
+  return done;
+}
+
+export async function processScanJob(
+  deps: PipelineDeps,
+  job: ScanJobData,
+  progress?: ProgressFn,
+): Promise<{ chunksIndexed: number }> {
   const projectId = await deps.catalog.upsertProject({
     slug: job.projectSlug,
     name: job.projectName,
@@ -245,10 +362,10 @@ export async function processScanJob(deps: PipelineDeps, job: ScanJobData): Prom
   });
   let chunksIndexed = 0;
   switch (job.sourceType) {
-    case 'kdb': chunksIndexed = await scanKdb(deps, job, projectId); break;
-    case 'claude_session': chunksIndexed = await scanClaude(deps, job, projectId); break;
-    case 'git_commit': chunksIndexed = await scanGit(deps, job, projectId); break;
-    case 'doc': chunksIndexed = await scanDocs(deps, job, projectId); break;
+    case 'kdb': chunksIndexed = await scanKdb(deps, job, projectId, progress); break;
+    case 'claude_session': chunksIndexed = await scanClaude(deps, job, projectId, progress); break;
+    case 'git_commit': chunksIndexed = await scanGit(deps, job, projectId, progress); break;
+    case 'doc': chunksIndexed = await scanDocs(deps, job, projectId, progress); break;
   }
   return { chunksIndexed };
 }
