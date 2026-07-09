@@ -37,7 +37,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: 'kdb_search',
     description:
-      'Hybrid semantic+keyword search across all indexed projects: kdb logs, Claude Code sessions, git commits, docs. Returns ranked snippets with sources.',
+      'Hybrid semantic+keyword search across all indexed projects: kdb logs, Claude Code sessions, git commits, docs. Returns ranked snippets, each with an entryId (pass to kdb_entry for the full text) and a hostPath.',
     schema: {
       query: z.string().describe('Natural-language or keyword query'),
       project: z.string().optional().describe('Project slug filter, e.g. "deepcast"'),
@@ -92,6 +92,13 @@ export const TOOLS: ToolDef[] = [
     request: (a) => ({
       path: `/api/projects/${encodeURIComponent(a.project)}/components/${encodeURIComponent(a.component)}`,
     }),
+  },
+  {
+    name: 'kdb_entry',
+    description:
+      'Read one indexed entry in full. Search returns short snippets; this returns the entire recorded body plus the source file path (hostPath) and an editor link. Use it after kdb_search or kdb_ask to read a result properly.',
+    schema: { entry_id: z.number().int().describe('entryId from a search hit or ask source') },
+    request: (a) => ({ path: `/api/entries/${encodeURIComponent(String(a.entry_id))}` }),
   },
   {
     name: 'kdb_session',

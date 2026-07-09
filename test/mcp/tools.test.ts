@@ -2,11 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { TOOLS } from '../../packages/mcp/src/tools.js';
 
 describe('MCP tool registry', () => {
-  it('exposes the 9 tools from the design spec', () => {
+  it('exposes the expected tools', () => {
     expect(TOOLS.map((t) => t.name).sort()).toEqual([
       'kdb_ask',
       'kdb_component_history',
       'kdb_components',
+      'kdb_entry',
       'kdb_projects',
       'kdb_reindex',
       'kdb_search',
@@ -14,6 +15,11 @@ describe('MCP tool registry', () => {
       'kdb_status',
       'kdb_timeline',
     ]);
+  });
+
+  it('kdb_entry fetches one full entry by id', () => {
+    const t = TOOLS.find((t) => t.name === 'kdb_entry')!;
+    expect(t.request({ entry_id: 2018 }).path).toBe('/api/entries/2018');
   });
 
   it('every tool has a description and a request mapper', () => {
