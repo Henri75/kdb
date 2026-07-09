@@ -21,6 +21,7 @@ check() {
 
 check "api health"   "$API/api/health"
 check "api stats"    "$API/api/stats"
+check "api dashboard" "$API/api/dashboard"
 check "api projects" "$API/api/projects"
 check "api search"   "$API/api/search?q=test&limit=1"
 check "mcp health"   "$MCP/health"

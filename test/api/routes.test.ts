@@ -22,6 +22,7 @@ function makeDeps(overrides: Partial<ApiDeps> = {}): ApiDeps {
         new Map(ids.filter((i) => i === 1).map((i) => [i, { id: i, title: 'entry' }])),
       recentErrors: async () => [{ id: 1, message: 'boom' }],
       getSetting: async () => null,
+      countSessions: async () => 485,
     } as any,
     search: { search: async () => ({ hits: [], mode: 'hybrid', degraded: false, tookMs: 5 }) } as any,
     ask: { ask: async () => ({ answer: '42 [1]', sources: [], model: 'm', degraded: false }) } as any,
@@ -30,6 +31,17 @@ function makeDeps(overrides: Partial<ApiDeps> = {}): ApiDeps {
     meta: () => ({ embedder: 'ollama/nomic-embed-text', collection: 'kdbscope_x' }),
     queueCounts: async () => ({ waiting: 5, active: 2, delayed: 1, failed: 0, completed: 90 }),
     pathMappings: [{ containerRoot: '/data/code', hostRoot: '/Users/nasta/__CODING NEW' }],
+    storage: async () => ({
+      postgresBytes: 245_298_879,
+      qdrantBytes: 2_515_421_157,
+      redisMemoryBytes: 4_378_216,
+      collections: [
+        { name: 'kdbscope_ollama_nomic_768', bytes: 1_414_856_704, active: true },
+        { name: 'kdbscope_bundled_minilm_384', bytes: 1_099_511_627, active: false },
+      ],
+    }),
+    health: async () => ({ postgres: true, qdrant: true, redis: true, ollama: true }),
+    vectorStats: async () => ({ points: 157_369, vectors: 314_201, segments: 7 }),
     ...overrides,
   };
 }
@@ -67,6 +79,50 @@ describe('api routes', () => {
     expect(body.queue).toBeNull();
     expect(body.pending).toBeNull();
     expect(body.projects).toBe(2);
+  });
+
+  describe('GET /api/dashboard', () => {
+    it('reports counts, storage, health and vector stats', async () => {
+      const body = await (await buildApp(makeDeps()).request('/api/dashboard')).json();
+      expect(body).toMatchObject({ projects: 2, entries: 10, chunks: 123, sessions: 485 });
+      expect(body.health).toEqual({ postgres: true, qdrant: true, redis: true, ollama: true });
+      expect(body.vectors).toMatchObject({ points: 157_369, vectors: 314_201 });
+      expect(body.storage.postgresBytes).toBe(245_298_879);
+    });
+
+    it('surfaces an orphaned collection left behind by a model switch', async () => {
+      const body = await (await buildApp(makeDeps()).request('/api/dashboard')).json();
+      const stale = body.storage.collections.filter((c: any) => !c.active);
+      expect(stale).toHaveLength(1);
+      expect(stale[0].name).toContain('bundled');
+    });
+
+    /** A null size means "cannot tell"; a 0 would claim "uses no disk". */
+    it('renders with an unmounted volume rather than reporting a fake zero', async () => {
+      const deps = makeDeps({
+        storage: async () => ({
+          postgresBytes: 1,
+          qdrantBytes: null,
+          redisMemoryBytes: null,
+          collections: [],
+        }),
+      });
+      const body = await (await buildApp(deps).request('/api/dashboard')).json();
+      expect(body.storage.qdrantBytes).toBeNull();
+      expect(body.storage.collections).toEqual([]);
+    });
+
+    it('renders when a dependency is down', async () => {
+      const deps = makeDeps({
+        health: async () => ({ postgres: true, qdrant: false, redis: true, ollama: false }),
+        vectorStats: async () => null,
+        queueCounts: async () => null,
+      });
+      const body = await (await buildApp(deps).request('/api/dashboard')).json();
+      expect(body.health.qdrant).toBe(false);
+      expect(body.vectors).toBeNull();
+      expect(body.pending).toBeNull();
+    });
   });
 
   it('GET /api/search requires q', async () => {

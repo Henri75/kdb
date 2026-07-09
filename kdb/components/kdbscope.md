@@ -204,3 +204,36 @@
 
 **Status:**
 - Completed
+---
+### [2026-07-10] - Overview dashboard and human-readable numbers
+
+**Objective:**
+- Format every count/size/time in a human-readable way, and give the UI a landing dashboard: projects, indexed documents, vectors, space used, services running.
+
+**Summary of Work:**
+- Shared formatters: compact() for scannable counts (82k) always paired with exact() in a title attribute; bytes() in binary units; duration(); relativeTime(); plural() that never renders "1 prompts". Applied to the sidebar project counts, footer, backfill bar, sessions, components. The CLI got its own num()/bytes()/duration(): a terminal line has room, so thousands separators beat compact forms there.
+- New GET /api/dashboard, deliberately separate from /api/stats (which the footer polls every 30s): it walks Qdrant's storage tree and probes every dependency. Storage figures cached 30s; measured cold 828ms / warm 64ms, and /api/stats stayed at 40ms.
+- DashboardView is now the landing page (hotkey 1; the other views shifted to 2-5). Headline counts, per-service health, per-store storage, source breakdown bars, and a callout for stale vector collections.
+- kdbs status now reports service health and storage too.
+
+**Key Decisions & Rationale:**
+- Postgres reports its size via pg_database_size(), Redis via INFO memory. Qdrant has NO API for disk usage: its telemetry exposes `disk_usage_bytes` and returns 0, which is worse than absent because it looks authoritative. Its volume is mounted read-only into the API at /qdrant-storage — far safer than handing a stats endpoint the Docker socket.
+- Labels distinguish disk from memory. Redis holds the job queue, so its *memory* is the honest number; its disk is transient. Lumping them under "space used" would mislead.
+- A null size renders as "—", never as 0: "cannot tell" is the truth, "uses no disk" is a lie.
+- The dashboard reads active_collection from settings, not from vectors.collection, which only catches up when someone searches — after a model switch it would name the old collection and invert the very warning we want to show.
+- health = "reachable from the API", which is exactly what determines whether search works.
+
+**Code/Files Modified:**
+- packages/core/src/{storage,catalog,qdrant,config,index}.ts (new storage.ts)
+- packages/api/src/{app,main}.ts, docker-compose.yml, scripts/smoke.sh
+- packages/ui/src/{format.ts,App.tsx,api.ts,types.ts}, components/Sidebar.tsx,
+  views/{DashboardView,SessionsView,ComponentsView}.tsx
+- packages/cli/src/{format,main}.ts, docs/{api,getting-started,cli,configuration}.md, README.md
+
+**Outcomes & Lessons Learned:**
+- **What Worked:** verified live — 2.64 GB Qdrant / 265 MB Postgres / 4.5 MB Redis, all four services running, and the dashboard correctly flagged 1,049 MB of stale vectors from the old bundled-CPU embedder. 222 -> 260 tests. The documented reclaim command was verified against a throwaway collection rather than the user's data.
+- **What Failed:** I nearly shipped a dashboard reporting 0 bytes for Qdrant, because its telemetry field `disk_usage_bytes` exists and returns 0. Cross-checking against `du` on the real filesystem caught it — the same lesson as points_count lagging wait:false writes. A metric that is present but wrong is worse than one that is missing.
+- **Also:** the directory walk is 187ms over 1,101 files, so it scales with file count rather than gigabytes. Worth knowing before assuming a landing page would slow as the index grows.
+
+**Status:**
+- Completed

@@ -135,6 +135,24 @@ export class VectorStore {
     }
   }
 
+  /**
+   * Points vs vectors: each point carries two named vectors (dense + sparse),
+   * so `indexed_vectors_count` runs at roughly twice the point count. Both are
+   * shown, because one of them is always the number someone expected.
+   */
+  async info(): Promise<{ points: number; vectors: number; segments: number } | null> {
+    try {
+      const r = await this.client.getCollection(this.collection);
+      return {
+        points: r.points_count ?? 0,
+        vectors: r.indexed_vectors_count ?? 0,
+        segments: r.segments_count ?? 0,
+      };
+    } catch {
+      return null;
+    }
+  }
+
   async count(): Promise<number> {
     try {
       const r = await this.client.count(this.collection, { exact: false });

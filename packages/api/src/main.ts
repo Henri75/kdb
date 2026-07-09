@@ -8,9 +8,14 @@ import {
   VectorStore,
   collectionNameFor,
   createEmbedder,
+  dirSize,
   getConfig,
   mappingsFromConfig,
+  ollamaAvailable,
+  parseRedisMemory,
+  qdrantCollectionSizes,
 } from '@kdbscope/core';
+import type { StorageUsage } from '@kdbscope/core';
 import type { EmbeddingProvider } from '@kdbscope/core';
 import { buildApp } from './app.js';
 
@@ -44,6 +49,34 @@ async function main() {
   const connection = new Redis(cfg.redisUrl, { maxRetriesPerRequest: null });
   const queue = new Queue('kdbscope-scan', { connection });
 
+  const STORAGE_TTL_MS = 30_000;
+  let storageCache: { at: number; value: StorageUsage } | null = null;
+
+  const cachedStorage = async (): Promise<StorageUsage> => {
+    if (storageCache && Date.now() - storageCache.at < STORAGE_TTL_MS) return storageCache.value;
+
+    // The indexer publishes the active collection; `vectors.collection` only
+    // catches up when someone searches, so after a model switch it can still
+    // name the old one — inverting the very warning we want to show.
+    const active = await catalog.getSetting('active_collection').catch(() => null);
+
+    const [postgresBytes, qdrantBytes, redisInfo, collections] = await Promise.all([
+      catalog.databaseSize(),
+      dirSize(cfg.qdrantStoragePath),
+      connection.info('memory').catch(() => ''),
+      qdrantCollectionSizes(cfg.qdrantStoragePath, active ?? vectors.collection),
+    ]);
+
+    const value: StorageUsage = {
+      postgresBytes,
+      qdrantBytes,
+      redisMemoryBytes: parseRedisMemory(redisInfo),
+      collections,
+    };
+    storageCache = { at: Date.now(), value };
+    return value;
+  };
+
   const app = buildApp({
     catalog,
     search,
@@ -62,6 +95,24 @@ async function main() {
       }
     },
     pathMappings: mappingsFromConfig(cfg),
+
+    // Walking Qdrant's storage tree is the slow part; sizes move slowly, so a
+    // short TTL keeps the dashboard fresh without re-crawling on every poll.
+    storage: () => cachedStorage(),
+
+    health: async () => {
+      const [postgres, qdrant, redis, ollama] = await Promise.all([
+        catalog.reachable(),
+        vectors.healthy(),
+        connection.ping().then(() => true).catch(() => false),
+        cfg.embeddings.provider === 'bundled'
+          ? Promise.resolve(true)
+          : ollamaAvailable(cfg.embeddings.ollamaUrl),
+      ]);
+      return { postgres, qdrant, redis, ollama };
+    },
+
+    vectorStats: () => vectors.info(),
     enqueueScan: async ({ project, full }) => {
       // The indexer's scheduler tick owns discovery; we piggyback by writing
       // a trigger job it treats identically (same queue, discovery job).

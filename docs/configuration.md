@@ -3,6 +3,7 @@
 # Configuration
 
 ## Revision History
+- 2026-07-10 00:00 UTC — QDRANT_STORAGE_PATH for dashboard disk usage.
 - 2026-07-09 16:00 UTC — Multiple project roots; why host paths are passed into the containers.
 - 2026-07-09 01:50 UTC — Ollama-preferred `auto` + version floor, WORKER_CONCURRENCY default 2, host-path passthrough, model-switch rebuild.
 - 2026-07-09 01:20 UTC — Initial version.
@@ -31,6 +32,12 @@ on container paths finds nothing and splits every project in two.
 
 The container-side mount points (`CODE_ROOT`, `CODE_ROOT_2` …) can be overridden
 but rarely need to be.
+
+## Storage
+
+| Var | Default | Meaning |
+|---|---|---|
+| `QDRANT_STORAGE_PATH` | `/qdrant-storage` | Where Qdrant's data volume is mounted **read-only** into the API, so the dashboard can report real disk usage. Qdrant exposes no API for it. |
 
 ## Indexing
 

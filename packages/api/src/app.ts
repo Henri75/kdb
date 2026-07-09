@@ -8,6 +8,7 @@ import type {
   PathMapping,
   SearchService,
   SourceType,
+  StorageUsage,
 } from '@kdbscope/core';
 
 /**
@@ -28,6 +29,12 @@ export interface ApiDeps {
   queueCounts: () => Promise<Record<string, number> | null>;
   /** Container→host path mounts, for editor deep links. */
   pathMappings: PathMapping[];
+  /** Disk/memory used by each store; nulls where a figure is unknowable. */
+  storage: () => Promise<StorageUsage>;
+  /** Which dependencies the API can actually reach — that is what search needs. */
+  health: () => Promise<Record<string, boolean>>;
+  /** Vector count of the active collection, distinct from the chunk count. */
+  vectorStats: () => Promise<{ points: number; vectors: number; segments: number } | null>;
 }
 
 export interface BackfillProgress {
@@ -72,6 +79,35 @@ export function buildApp(deps: ApiDeps): Hono {
     }
     const pending = queue ? (queue.waiting ?? 0) + (queue.active ?? 0) + (queue.delayed ?? 0) : null;
     return c.json({ ...stats, chunks, ...deps.meta(), queue, pending, backfill });
+  });
+
+  /**
+   * Everything the dashboard shows. Kept out of `/api/stats` on purpose: this
+   * walks Qdrant's storage directory and probes every dependency, which is far
+   * too slow for the footer that polls every 30 seconds.
+   */
+  app.get('/api/dashboard', async (c) => {
+    const [stats, chunks, queue, storage, health, vectors, sessions] = await Promise.all([
+      deps.catalog.stats(),
+      deps.vectorCount(),
+      deps.queueCounts(),
+      deps.storage(),
+      deps.health(),
+      deps.vectorStats(),
+      deps.catalog.countSessions().catch(() => 0),
+    ]);
+    const pending = queue ? (queue.waiting ?? 0) + (queue.active ?? 0) + (queue.delayed ?? 0) : null;
+    return c.json({
+      ...stats,
+      chunks,
+      sessions,
+      ...deps.meta(),
+      queue,
+      pending,
+      storage,
+      health,
+      vectors,
+    });
   });
 
   app.get('/api/search', async (c) => {

@@ -3,6 +3,7 @@
 # Getting Started
 
 ## Revision History
+- 2026-07-10 00:00 UTC — Overview dashboard; human-readable numbers throughout.
 - 2026-07-09 22:30 UTC — Ask conversations, message kinds, timeline layouts, session filters.
 - 2026-07-09 16:00 UTC — Multiple project roots; clarified that `make cli-link` is global and run once.
 - 2026-07-09 12:20 UTC — Initial version.
@@ -51,7 +52,7 @@ That's it. Three surfaces are now live:
 Check it came up:
 
 ```bash
-make smoke    # six endpoint checks
+make smoke    # seven endpoint checks
 make logs     # follow indexer/api/mcp
 ```
 
@@ -80,9 +81,13 @@ folder — it is a thin client for the API and always searches everything the
 
 ### Web UI — <http://127.0.0.1:8712>
 
-Four views, switchable with keys `1`–`4`:
+Five views, switchable with keys `1`–`5`:
 
-1. **Search & Ask** — press `/` to focus the box.
+1. **Overview** — the landing page: how many projects, documents, chunks and
+   sessions are indexed; which services are running; how much disk each store
+   uses; and what the index is made of. It also flags vectors left behind by an
+   embedding-model change — usually a gigabyte nothing reads.
+2. **Search & Ask** — press `/` to focus the box.
    - `Enter` runs a hybrid search (semantic + keyword).
    - `⌘Enter` asks the LLM, which **streams** a cited answer.
    - Ask is a **conversation**: keep asking follow-ups and the LLM sees the
@@ -96,12 +101,12 @@ Four views, switchable with keys `1`–`4`:
      the old scope.
    - Click any result — or any `[n]` citation — to open the full entry, with
      **Open in editor**.
-2. **Timeline** — a project's history, newest first. Toggle **FEED** (grouped by
+3. **Timeline** — a project's history, newest first. Toggle **FEED** (grouped by
    day, colour-coded) or **TABLE** (date and time in their own columns, easier
    to scan by *when*). The choice is remembered. Filter the loaded entries.
-3. **Components** — browse a project's components and their recorded history,
+4. **Components** — browse a project's components and their recorded history,
    with a filter.
-4. **Sessions** — replay a Claude Code conversation. Filter the list; inside a
+5. **Sessions** — replay a Claude Code conversation. Filter the list; inside a
    session, filter the messages or narrow to a kind (`YOU`, `CLAUDE`, `INSIGHT`,
    `DID`, …). The header shows when it ran, how long it took, and how many
    prompts, actions and files were involved.
@@ -126,7 +131,7 @@ kdbs components deepcast          # this project's components
 kdbs component deepcast analyzer-worker
 kdbs sessions deepcast
 kdbs session 0075adef             # replay one conversation
-kdbs status                       # counts, freshness, errors
+kdbs status                       # counts, health, storage, freshness
 ```
 
 Add `--json` to any command for scripting. Ask streams to your terminal;
@@ -181,6 +186,14 @@ collection. The indexer rebuilds the vectors **from Postgres** (no re-parsing),
 resumes if interrupted, and only switches search over when the new collection is
 ready. Search keeps serving the old one throughout. A ~74k-entry rebuild takes
 roughly 40 minutes.
+
+The **previous collection stays on disk** — often more than a gigabyte. The
+Overview flags it as `STALE`, and `kdbs status` says so too. Nothing reads it.
+Reclaim the space by deleting that collection in Qdrant:
+
+```bash
+curl -X DELETE "http://127.0.0.1:6363/collections/<stale-collection-name>"
+```
 
 ---
 

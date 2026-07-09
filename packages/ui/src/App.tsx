@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api';
 import type { ProjectRow, Stats } from './types';
 import { Sidebar, type View } from './components/Sidebar';
+import { DashboardView } from './views/DashboardView';
 import { SearchView } from './views/SearchView';
 import { TimelineView } from './views/TimelineView';
 import { ComponentsView } from './views/ComponentsView';
@@ -15,7 +16,9 @@ export default function App() {
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [project, setProject] = useState('');
-  const [view, setView] = useState<View>('search');
+  // The overview answers "is this healthy and what's in it?" — the question you
+  // have on arriving. `/` still jumps straight to search.
+  const [view, setView] = useState<View>('dashboard');
   const [openSessionId, setOpenSessionId] = useState('');
   const [offline, setOffline] = useState(false);
   const [toast, setToast] = useState('');
@@ -49,8 +52,12 @@ export default function App() {
         e.preventDefault();
         setView('search');
         setTimeout(() => searchRef.current?.focus(), 0);
-      } else if (!typing && ['1', '2', '3', '4'].includes(e.key)) {
-        setView((['search', 'timeline', 'components', 'sessions'] as View[])[Number(e.key) - 1]!);
+      } else if (!typing && ['1', '2', '3', '4', '5'].includes(e.key)) {
+        setView(
+          (['dashboard', 'search', 'timeline', 'components', 'sessions'] as View[])[
+            Number(e.key) - 1
+          ]!,
+        );
       } else if (e.key === 'Escape' && openSessionId) {
         setOpenSessionId('');
       }
@@ -105,6 +112,7 @@ export default function App() {
             </span>
           </div>
         )}
+        {view === 'dashboard' && <DashboardView onGoTo={setView} />}
         {view === 'search' && (
           <SearchView project={project} inputRef={searchRef} onOpenSession={openSession} />
         )}

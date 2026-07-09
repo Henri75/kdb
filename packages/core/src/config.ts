@@ -24,6 +24,11 @@ const schema = z.object({
   databaseUrl: z.string().default('postgres://kdbscope:kdbscope@postgres:5432/kdbscope'),
   redisUrl: z.string().default('redis://redis:6379'),
   qdrantUrl: z.string().default('http://qdrant:6333'),
+  /**
+   * Qdrant's storage volume, mounted read-only into the API so the dashboard
+   * can report real disk usage — Qdrant exposes no API for it.
+   */
+  qdrantStoragePath: z.string().default('/qdrant-storage'),
   scanIntervalMin: z.coerce.number().int().min(1).default(5),
   /**
    * Parallel scan jobs. Every job embeds, and a local Ollama serialises
@@ -85,6 +90,7 @@ function fromEnv(env: NodeJS.ProcessEnv): AppConfig {
     databaseUrl: opt(env.DATABASE_URL),
     redisUrl: opt(env.REDIS_URL),
     qdrantUrl: opt(env.QDRANT_URL),
+    qdrantStoragePath: opt(env.QDRANT_STORAGE_PATH),
     scanIntervalMin: opt(env.SCAN_INTERVAL_MIN),
     workerConcurrency: opt(env.WORKER_CONCURRENCY),
     embeddings: {

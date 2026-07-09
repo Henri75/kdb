@@ -3,6 +3,7 @@
 # REST API
 
 ## Revision History
+- 2026-07-10 00:00 UTC — /api/dashboard: storage, service health, vector stats.
 - 2026-07-09 22:25 UTC — Conversation history on both Ask endpoints; `kind` filter.
 - 2026-07-09 01:50 UTC — Streaming Ask (SSE), source deep links, richer /api/stats.
 - 2026-07-09 01:20 UTC — Initial version.
@@ -13,6 +14,7 @@ Base: `http://127.0.0.1:8710`. JSON everywhere. No auth (localhost-only tool).
 |---|---|---|---|
 | GET | `/api/health` | — | `{ok}` |
 | GET | `/api/stats` | — | counts, per-source breakdown, embedder, collection, lastRunAt, `queue`, `pending`, `backfill`, `recentErrors` |
+| GET | `/api/dashboard` | — | everything in `/api/stats` plus `sessions`, `storage`, `health`, `vectors` |
 | GET | `/api/search` | `q` (required), `project`, `source`, `component`, `kind`, `since`, `until`, `limit` | `{hits[], mode, degraded, tookMs}`; each hit carries `hostPath` + `editorUrl` |
 | POST | `/api/ask` | `{question, project?, source?, component?, kind?, k?, history?}` | `{answer, sources[], model, degraded}` |
 | POST | `/api/ask/stream` | same as `/api/ask` | SSE: `sources` → `delta`* → `done` |
@@ -29,6 +31,33 @@ Base: `http://127.0.0.1:8710`. JSON everywhere. No auth (localhost-only tool).
 `mode` in search responses: `hybrid` (dense+sparse RRF), `sparse-only`
 (embedding provider unreachable), `fts` (Qdrant unreachable — Postgres fallback).
 `degraded: true` whenever the served mode is not `hybrid`.
+
+## Dashboard
+
+`/api/dashboard` is deliberately separate from `/api/stats`: it walks Qdrant's
+storage directory and probes every dependency, which is far too slow for the
+footer that polls `/api/stats` every 30 seconds. Storage figures are cached for
+30 seconds (the walk is ~200ms over ~1,100 files, and grows with file count
+rather than gigabytes).
+
+- `health` — `{postgres, qdrant, redis, ollama}`. These are *reachability from
+  the API*, which is exactly what determines whether search works. Knowing a
+  container's Docker state would need the Docker socket, an absurd privilege
+  for a stats endpoint.
+- `vectors` — `{points, vectors, segments}`. Each point carries two named
+  vectors (dense + sparse), so `vectors` runs at roughly twice `points`.
+- `storage` — `postgresBytes` and `qdrantBytes` are **disk**, `redisMemoryBytes`
+  is **memory** (Redis holds the job queue; its disk is transient). A `null`
+  means *cannot tell*, never *uses no disk*.
+- `storage.collections` — per-collection sizes with an `active` flag. Switching
+  the embedding model leaves the previous collection behind; on a real index
+  that is over a gigabyte of vectors nothing reads.
+
+Postgres reports its own size via `pg_database_size()` and Redis via
+`INFO memory`. Qdrant has **no API for disk usage** — its telemetry exposes a
+`disk_usage_bytes` field that reports `0`, which is worse than absent because it
+looks authoritative. Its storage volume is therefore mounted **read-only** into
+the API container at `/qdrant-storage`.
 
 ## Conversations
 

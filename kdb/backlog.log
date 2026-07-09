@@ -22,3 +22,5 @@
 - [2026-07-09] [kdbscope] DONE: multiple project roots (CODE_ROOT_HOST_2..5)
 - [2026-07-09] [kdbscope] Qdrant 'kind' payload index is only created on a NEW collection; existing collections filter without it (slower). Add an ensure-index-on-existing path.
 - [2026-07-09] [kdbscope] Timeline filter only searches loaded pages; consider a server-side timeline search.
+- [2026-07-10] [kdbscope] Qdrant storage tree is walked twice per dashboard refresh (once for the total, once per collection); sum the per-collection walk instead.
+- [2026-07-10] [kdbscope] Offer a one-click reclaim for stale vector collections from the dashboard, rather than a documented curl.

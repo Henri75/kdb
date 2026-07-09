@@ -11,6 +11,7 @@ import {
   Stamp,
   matches,
 } from '../components/ui';
+import { compact, duration, exact, plural } from '../format';
 
 /** Colour and label per message kind. Actions are the "what was done" trail. */
 const KIND: Record<SessionEntryKind, { label: string; color: string }> = {
@@ -24,20 +25,12 @@ const KIND: Record<SessionEntryKind, { label: string; color: string }> = {
 
 const kindOf = (e: any): SessionEntryKind => (e.meta?.kind as SessionEntryKind) ?? 'response';
 
-function plural(n: number, one: string, many = `${one}s`) {
-  return `${n} ${n === 1 ? one : many}`;
-}
-
-/** Human duration between two ISO stamps. */
-function duration(from?: string, to?: string): string | null {
+/** Elapsed time between two ISO stamps, or null when it cannot be known. */
+function elapsed(from?: string, to?: string): string | null {
   if (!from || !to) return null;
   const ms = new Date(to).getTime() - new Date(from).getTime();
   if (!Number.isFinite(ms) || ms < 0) return null;
-  const mins = Math.round(ms / 60000);
-  if (mins < 1) return '< 1 min';
-  if (mins < 60) return `${mins} min`;
-  const h = Math.floor(mins / 60);
-  return `${h}h ${mins % 60}m`;
+  return duration(ms / 1000);
 }
 
 function SessionDetail({
@@ -72,7 +65,7 @@ function SessionDetail({
       return next;
     });
 
-  const took = duration(session.started_at, session.ended_at);
+  const took = elapsed(session.started_at, session.ended_at);
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -254,8 +247,11 @@ export function SessionsView({
               <span className="text-[14px] flex-1 truncate">
                 <Highlight text={s.title ?? '(untitled session)'} needle={q} />
               </span>
-              <span className="font-mono text-[11px] text-muted whitespace-nowrap">
-                {s.prompt_count}p · {s.action_count ?? 0}a
+              <span
+                className="font-mono text-[11px] text-muted whitespace-nowrap tabular-nums"
+                title={`${exact(s.prompt_count)} prompts · ${exact(s.action_count ?? 0)} actions`}
+              >
+                {compact(s.prompt_count)}p · {compact(s.action_count ?? 0)}a
               </span>
               <Stamp iso={s.started_at} />
             </div>

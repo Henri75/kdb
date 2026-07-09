@@ -1,7 +1,21 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
 import { get, post, postStream, qs } from './api.js';
-import { SOURCE_BADGE, bold, cyan, date, dim, green, hr, magenta, red, yellow } from './format.js';
+import {
+  SOURCE_BADGE,
+  bold,
+  bytes,
+  cyan,
+  date,
+  dim,
+  duration,
+  green,
+  hr,
+  magenta,
+  num,
+  red,
+  yellow,
+} from './format.js';
 
 /**
  * kdbs — terminal client for KDBScope. Every command supports --json for
@@ -205,35 +219,61 @@ program
 
 program
   .command('status')
-  .description('index stats and freshness')
+  .description('what is indexed, whether it is healthy, and what it costs')
   .action(async () => {
-    const r = await get('/api/stats');
+    // The dashboard endpoint carries storage and health too; it is slower than
+    // /api/stats, which is fine for a command someone typed.
+    const r = await get('/api/dashboard');
     out(r, () => {
-      console.log(`${bold('projects')}  ${r.projects}`);
-      console.log(`${bold('entries')}   ${r.entries}`);
-      console.log(`${bold('chunks')}    ${r.chunks}`);
+      console.log(`${bold('projects')}  ${num(r.projects)}`);
+      console.log(`${bold('entries')}   ${num(r.entries)}`);
+      console.log(`${bold('chunks')}    ${num(r.chunks)}`);
+      console.log(`${bold('sessions')}  ${num(r.sessions)}`);
       console.log(
-        `${bold('errors')}    ${r.recentErrors > 0 ? red(`${r.recentErrors} in the last hour`) : green('none in the last hour')}` +
-          dim(` (${r.errors} lifetime)`),
+        `${bold('errors')}    ${r.recentErrors > 0 ? red(`${num(r.recentErrors)} in the last hour`) : green('none in the last hour')}` +
+          dim(` (${num(r.errors)} lifetime)`),
       );
       console.log(`${bold('embedder')}  ${r.embedder} → ${dim(r.collection)}`);
       console.log(`${bold('last run')}  ${date(r.lastRunAt) || dim('never')}`);
       if (r.pending != null) {
-        console.log(`${bold('queued')}    ${r.pending} scan job${r.pending === 1 ? '' : 's'}`);
+        console.log(`${bold('queued')}    ${num(r.pending)} scan job${r.pending === 1 ? '' : 's'}`);
       }
       if (r.backfill) {
         const pct = Math.round((r.backfill.done / Math.max(1, r.backfill.total)) * 100);
-        const mins = Math.round(r.backfill.etaSec / 60);
         console.log(
           yellow(
-            `re-embed  ${r.backfill.done.toLocaleString()}/${r.backfill.total.toLocaleString()} ` +
-              `(${pct}%, ~${mins}m left) — results incomplete until this finishes`,
+            `re-embed  ${num(r.backfill.done)}/${num(r.backfill.total)} ` +
+              `(${pct}%, ~${duration(r.backfill.etaSec)} left) — results incomplete until this finishes`,
           ),
         );
       }
+
+      if (r.health) {
+        console.log(dim('\nservices:'));
+        for (const [name, up] of Object.entries(r.health as Record<string, boolean>)) {
+          console.log(`  ${name.padEnd(12)} ${up ? green('running') : red('unreachable')}`);
+        }
+      }
+
+      if (r.storage) {
+        console.log(dim('\nstorage:'));
+        console.log(`  ${'postgres'.padEnd(12)} ${bytes(r.storage.postgresBytes)} ${dim('disk')}`);
+        console.log(`  ${'qdrant'.padEnd(12)} ${bytes(r.storage.qdrantBytes)} ${dim('disk')}`);
+        console.log(`  ${'redis'.padEnd(12)} ${bytes(r.storage.redisMemoryBytes)} ${dim('memory')}`);
+        const stale = (r.storage.collections ?? []).filter((c: any) => !c.active && c.bytes > 0);
+        const staleBytes = stale.reduce((s: number, c: any) => s + c.bytes, 0);
+        if (staleBytes > 0) {
+          console.log(
+            yellow(
+              `  ${bytes(staleBytes)} of stale vectors from an old embedding model — nothing reads them`,
+            ),
+          );
+        }
+      }
+
       console.log(dim('\nby source:'));
       for (const [k, v] of Object.entries(r.bySource ?? {})) {
-        console.log(`  ${(SOURCE_BADGE[k] ?? k).padEnd(12)} ${v}`);
+        console.log(`  ${(SOURCE_BADGE[k] ?? k).padEnd(12)} ${num(v as number).padStart(9)}`);
       }
     });
   });

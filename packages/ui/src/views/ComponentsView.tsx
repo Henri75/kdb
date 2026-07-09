@@ -12,6 +12,7 @@ import {
   Stamp,
   matches,
 } from '../components/ui';
+import { compact, exact } from '../format';
 
 /** Component explorer: list on the left, selected component's history on the right. */
 export function ComponentsView({
@@ -74,7 +75,12 @@ export function ComponentsView({
               }`}
             >
               <span className="truncate flex-1">{c.component}</span>
-              <span className="font-mono text-[11px] text-faint">{c.count}</span>
+              <span
+                className="font-mono text-[11px] text-faint tabular-nums"
+                title={`${exact(c.count)} entries`}
+              >
+                {compact(c.count)}
+              </span>
             </button>
           ))}
         </div>

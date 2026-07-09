@@ -60,6 +60,10 @@ services:
       - '127.0.0.1:${API_PORT:-8710}:8710'
     volumes:
       - hf_cache:/app/.cache
+      # Read-only so the dashboard can report Qdrant's real disk usage. Qdrant
+      # has no API for it (its telemetry `disk_usage_bytes` reports 0), and
+      # mounting the volume is far safer than handing the API a Docker socket.
+      - qdrant_data:/qdrant-storage:ro
     healthcheck:
       test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:8710/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 15s

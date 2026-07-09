@@ -391,6 +391,31 @@ export class Catalog {
     }));
   }
 
+  /** On-disk size of the catalog database. */
+  async databaseSize(): Promise<number | null> {
+    try {
+      const r = await this.pool.query('SELECT pg_database_size(current_database()) AS b');
+      return Number(r.rows[0].b);
+    } catch {
+      return null;
+    }
+  }
+
+  /** Cheap liveness probe used by the dashboard. */
+  async reachable(): Promise<boolean> {
+    try {
+      await this.pool.query('SELECT 1');
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async countSessions(): Promise<number> {
+    const r = await this.pool.query('SELECT count(*)::int AS c FROM sessions');
+    return r.rows[0].c;
+  }
+
   async countEntries(): Promise<number> {
     const r = await this.pool.query('SELECT count(*)::int AS c FROM entries');
     return r.rows[0].c;

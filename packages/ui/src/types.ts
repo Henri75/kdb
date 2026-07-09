@@ -95,6 +95,27 @@ export type EntryKind =
 /** Alias kept for the session views, which speak in terms of messages. */
 export type SessionEntryKind = EntryKind;
 
+export interface CollectionSize {
+  name: string;
+  bytes: number;
+  active: boolean;
+}
+
+export interface StorageUsage {
+  /** null means "cannot tell" — never render it as 0. */
+  postgresBytes: number | null;
+  qdrantBytes: number | null;
+  redisMemoryBytes: number | null;
+  collections: CollectionSize[];
+}
+
+export interface Dashboard extends Stats {
+  sessions: number;
+  storage: StorageUsage;
+  health: Record<string, boolean>;
+  vectors: { points: number; vectors: number; segments: number } | null;
+}
+
 export interface Stats {
   projects: number;
   entries: number;

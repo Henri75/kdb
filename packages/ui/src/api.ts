@@ -1,6 +1,7 @@
 import type {
   AskResult,
   ComponentRow,
+  Dashboard,
   ProjectRow,
   SearchResult,
   SessionRow,
@@ -97,6 +98,7 @@ export const api = {
   sessions: (slug: string) => get<{ sessions: SessionRow[] }>(`/api/projects/${slug}/sessions`),
   session: (id: string) => get<{ session: SessionRow; entries: any[] }>(`/api/sessions/${id}`),
   stats: () => get<Stats>('/api/stats'),
+  dashboard: () => get<Dashboard>('/api/dashboard'),
   reindex: (body: Record<string, unknown> = {}) =>
     post<{ enqueued: number }>('/api/admin/reindex', body),
 };

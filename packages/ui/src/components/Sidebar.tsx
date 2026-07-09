@@ -1,13 +1,15 @@
 import type { ProjectRow, Stats } from '../types';
 import { Eyebrow } from './ui';
+import { compact, duration, exact, relativeTime } from '../format';
 
-export type View = 'search' | 'timeline' | 'components' | 'sessions';
+export type View = 'dashboard' | 'search' | 'timeline' | 'components' | 'sessions';
 
 const VIEWS: { key: View; label: string; hotkey: string }[] = [
-  { key: 'search', label: 'Search & Ask', hotkey: '1' },
-  { key: 'timeline', label: 'Timeline', hotkey: '2' },
-  { key: 'components', label: 'Components', hotkey: '3' },
-  { key: 'sessions', label: 'Sessions', hotkey: '4' },
+  { key: 'dashboard', label: 'Overview', hotkey: '1' },
+  { key: 'search', label: 'Search & Ask', hotkey: '2' },
+  { key: 'timeline', label: 'Timeline', hotkey: '3' },
+  { key: 'components', label: 'Components', hotkey: '4' },
+  { key: 'sessions', label: 'Sessions', hotkey: '5' },
 ];
 
 /**
@@ -17,12 +19,12 @@ const VIEWS: { key: View; label: string; hotkey: string }[] = [
  */
 function BackfillBar({ backfill }: { backfill: NonNullable<Stats['backfill']> }) {
   const pct = Math.min(100, Math.round((backfill.done / Math.max(1, backfill.total)) * 100));
-  const mins = Math.round(backfill.etaSec / 60);
+  const left = duration(backfill.etaSec);
   return (
     <div className="pt-1.5" role="status">
       <div className="flex justify-between mb-1" style={{ color: 'var(--color-kdb)' }}>
         <span>re-embedding index</span>
-        <span>{mins > 0 ? `~${mins}m left` : 'finishing'}</span>
+        <span>{backfill.etaSec > 30 ? `~${left} left` : 'finishing'}</span>
       </div>
       <div className="h-1 rounded-full overflow-hidden" style={{ background: 'var(--color-line)' }}>
         <div
@@ -30,9 +32,9 @@ function BackfillBar({ backfill }: { backfill: NonNullable<Stats['backfill']> })
           style={{ width: `${pct}%`, background: 'var(--color-kdb)' }}
         />
       </div>
-      <div className="mt-1">
-        {backfill.done.toLocaleString()}/{backfill.total.toLocaleString()} · results are
-        incomplete until this finishes
+      <div className="mt-1" title={`${exact(backfill.done)} of ${exact(backfill.total)}`}>
+        {compact(backfill.done)}/{compact(backfill.total)} · results are incomplete until this
+        finishes
       </div>
     </div>
   );
@@ -105,7 +107,13 @@ export function Sidebar({
               style={{ background: p.hasKdb ? 'var(--color-kdb)' : 'var(--color-line)' }}
             />
             <span className="truncate flex-1">{p.slug}</span>
-            <span className="font-mono text-[10px] text-faint">{p.entryCount}</span>
+            {/* Compact so the column aligns and stops jittering; exact on hover. */}
+            <span
+              className="font-mono text-[10px] text-faint tabular-nums"
+              title={`${exact(p.entryCount)} entries`}
+            >
+              {compact(p.entryCount)}
+            </span>
           </button>
         ))}
       </div>
@@ -113,22 +121,25 @@ export function Sidebar({
       <div className="px-4 py-3 border-t border-line font-mono text-[10px] text-faint space-y-1">
         {stats && (
           <>
-            <div>
-              {stats.entries.toLocaleString()} entries · {stats.chunks.toLocaleString()} chunks
+            <div title={`${exact(stats.entries)} entries · ${exact(stats.chunks)} chunks`}>
+              {compact(stats.entries)} entries · {compact(stats.chunks)} chunks
             </div>
             <div>
               embedder {stats.embedder} ·{' '}
               {stats.recentErrors > 0 ? (
-                <span style={{ color: 'var(--color-report)' }} title={`${stats.errors} lifetime`}>
-                  {stats.recentErrors} errors/hr
+                <span
+                  style={{ color: 'var(--color-report)' }}
+                  title={`${exact(stats.errors)} lifetime`}
+                >
+                  {compact(stats.recentErrors)} errors/hr
                 </span>
               ) : (
-                <span title={`${stats.errors} lifetime`}>no recent errors</span>
+                <span title={`${exact(stats.errors)} lifetime`}>no recent errors</span>
               )}
             </div>
-            <div>
-              last run {stats.lastRunAt ? stats.lastRunAt.slice(5, 16).replace('T', ' ') : '—'}
-              {stats.pending ? ` · ${stats.pending} queued` : ''}
+            <div title={stats.lastRunAt ?? undefined}>
+              indexed {relativeTime(stats.lastRunAt)}
+              {stats.pending ? ` · ${compact(stats.pending)} queued` : ''}
             </div>
             {stats.backfill && <BackfillBar backfill={stats.backfill} />}
           </>
