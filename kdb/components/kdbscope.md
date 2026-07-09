@@ -79,3 +79,32 @@
 
 **Status:**
 - Completed
+---
+### [2026-07-09] - Post-v0.2 hardening + full re-embed onto Ollama
+
+**Objective:**
+- Finish the backlog and verify the whole system on real data after the Ollama upgrade.
+
+**Summary of Work:**
+- MCP kdb_entry: agents could only ever see 280-char snippets; now they can read the full record behind any entryId, with hostPath + editor link. Verified the loop live: kdb_search -> entryId 2018 -> kdb_entry -> changelog.log:479.
+- Backfill resume cursor, persisted per collection in settings; a restart mid-rebuild no longer re-embeds from entry 1 (it had thrown away 40k entries).
+- Boot warning when Ollama < 0.13 (non-fatal, names the symptom and the fix).
+- Degraded-search banner in UI + CLI naming the cause and the cost.
+- Full re-embed onto ollama/nomic-embed-text (768-dim) completed: 74202 entries -> 102202 chunks in 2332s.
+
+**Key Decisions & Rationale:**
+- onPage reports both `done` (absolute, for the bar) and `embedded` (this run, for throughput) — computing a rate from a resumed prefix gives a nonsense ETA.
+- The version guard warns and proceeds: a fork, a custom build or an unparseable version must not stop the indexer booting.
+- Degradation is reported at the weight of a warning. It was an 11px grey footnote, which is exactly why the stale-collection bug ran for an hour with every query silently on the Postgres fallback.
+
+**Code/Files Modified:**
+- packages/mcp/src/tools.ts, packages/indexer/src/{pipeline,main}.ts
+- packages/core/src/{catalog,embeddings/ollama,embeddings/index}.ts
+- packages/ui/src/components/ui.tsx, views/SearchView.tsx, packages/cli/src/main.ts
+
+**Outcomes & Lessons Learned:**
+- **What Worked:** verified on the real corpus end-to-end — hybrid search 314ms, streaming Ask 0.79s to first token through nginx, and Ask correctly surfaced TWO distinct pgbouncer root causes across a Claude session, a README and a kdb component log. A healthy-collection restart correctly did NOT re-trigger a rebuild (needsBackfill(102202, 74202) = false). 63 -> 143 tests.
+- **What Failed:** nothing new. Re-confirmed the earlier lesson: a flat Qdrant points_count and a quiet progress log both look like a stall — cross-check throughput (chunks/s) and the provider's CPU before diagnosing.
+
+**Status:**
+- Completed

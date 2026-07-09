@@ -16,3 +16,11 @@
 
 **AI Response Summary:**
 > Logged the 10 backlog items first (none existed yet), then shipped all of them: streaming Ask over SSE end-to-end (core -> api -> ui + cli, verified live at 1.1s to first token through nginx), Ollama-by-default with auto-pull and loud fallback logging, sessions indexed newest-first, an entry drawer with full bodies and line-accurate vscode:// deep links, and index progress + a recent-error metric. Running it for real then exposed a stalled re-embed: root-caused it through the layers to an Ollama 0.12.6 segfault inside /api/embed (796 x HTTP 500 + a Go stack trace) — upgraded to 0.31.1 as a launchd service — and fixed seven of our own bugs it uncovered (wait:true upserts blowing Qdrant's 5s timeout, 52-minute unbounded jobs, in-memory chunk blowup, ':' in BullMQ job ids crash-looping the indexer, a stale active_collection silently degrading every search to Postgres FTS, a backfill trigger that only fired on an empty collection, and transient errors misclassified because the status was stringified into the message). Also learned Qdrant's points_count lags wait:false writes and is useless as a progress metric. 63 -> 129 tests, lint clean, smoke 6/6, zero index errors since the fix.
+---
+### [2026-07-09 02:20 UTC]
+
+**User Prompt Summary:**
+> Continuation: implement the v0.2 items and the whole backlog, then keep improving.
+
+**AI Response Summary:**
+> Shipped the remaining backlog (MCP kdb_entry, backfill resume cursor, Ollama version guard, degraded-search banner) and completed the full re-embed onto Ollama: 74202 entries -> 102202 chunks in 2332s. Verified the finished system on real data — hybrid search 314ms, streaming Ask 0.79s to first token through nginx, MCP search->entry loop, and a healthy-collection restart correctly skipping the rebuild. 143 tests, lint clean, smoke 6/6, zero index errors since the Ollama fix.

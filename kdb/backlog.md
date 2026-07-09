@@ -14,3 +14,6 @@
 - [2026-07-09] [kdbscope] Qdrant points_count lags wait:false writes — /api/stats 'chunks' is an estimate; consider counting from the catalog instead
 - [2026-07-09] [kdbscope] Old-format job ids (with ':') linger in redis from before the id fix; add a one-time queue drain on version change
 - [2026-07-09] [kdbscope] Pin/check the Ollama version at boot: 0.12.x segfaults on /api/embed; warn when below a known-good floor
+- [2026-07-09] [kdbscope] DONE: backfill resume cursor (persisted per collection in settings)
+- [2026-07-09] [kdbscope] DONE: warn at boot when Ollama is below the 0.13 known-good floor
+- [2026-07-09] [kdbscope] DONE: degraded-search banner in UI + CLI (was an 11px grey footnote nobody reads)
