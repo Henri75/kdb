@@ -40,12 +40,22 @@ export function collectionNameFor(provider: string, model: string, dim: number):
  * silently returns the wrong rows and an over-narrow one silently returns
  * none, so this is worth testing on its own.
  */
-export function buildQdrantFilter(filters: SearchFilters): { must: object[] } | undefined {
+export function buildQdrantFilter(
+  filters: SearchFilters,
+): { must: object[]; must_not?: object[] } | undefined {
   const must: object[] = [];
+  const mustNot: object[] = [];
   if (filters.project) must.push({ key: 'project', match: { value: filters.project } });
   if (filters.sourceType) must.push({ key: 'source_type', match: { value: filters.sourceType } });
   if (filters.component) must.push({ key: 'component', match: { value: filters.component } });
   if (filters.kind) must.push({ key: 'kind', match: { value: filters.kind } });
+  // 'active' is expressed as NOT archived: most points carry no doc_status at
+  // all, and a positive match would silently exclude every one of them.
+  if (filters.docStatus === 'archived') {
+    must.push({ key: 'doc_status', match: { value: 'archived' } });
+  } else if (filters.docStatus === 'active') {
+    mustNot.push({ key: 'doc_status', match: { value: 'archived' } });
+  }
   if (filters.since || filters.until) {
     must.push({
       key: 'occurred_at',
@@ -55,7 +65,8 @@ export function buildQdrantFilter(filters: SearchFilters): { must: object[] } | 
       },
     });
   }
-  return must.length ? { must } : undefined;
+  if (!must.length && !mustNot.length) return undefined;
+  return { must, ...(mustNot.length ? { must_not: mustNot } : {}) };
 }
 
 export class VectorStore {

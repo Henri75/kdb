@@ -1,4 +1,5 @@
 import type { Catalog } from './catalog.js';
+import { DEFAULT_AGING_MONTHS, DEFAULT_ARCHIVED_PENALTY, deriveDocAge } from './docStatus.js';
 import type { EmbeddingProvider } from './embeddings/types.js';
 import type { VectorStore } from './qdrant.js';
 import { sparseVector } from './sparse.js';
@@ -11,6 +12,13 @@ import type { SearchFilters, SearchHit, SearchResult } from './types.js';
 /** How long the API trusts its cached view of the indexer's active collection. */
 const COLLECTION_TTL_MS = 15_000;
 
+export interface DocRankingOpts {
+  /** Multiplier applied to the fused score of archived doc hits. */
+  archivedPenalty?: number;
+  /** Age (months) past which an unarchived doc gets the aging label. */
+  agingMonths?: number;
+}
+
 export class SearchService {
   private collectionCheckedAt = 0;
 
@@ -19,6 +27,7 @@ export class SearchService {
     private vectors: VectorStore,
     /** Resolved lazily and may be null when the provider is unreachable. */
     private embedder: EmbeddingProvider | null,
+    private ranking: DocRankingOpts = {},
   ) {}
 
   setEmbedder(e: EmbeddingProvider | null) {
@@ -60,20 +69,48 @@ export class SearchService {
       }
     }
 
+    // Over-fetch so downranked archived docs can fall out of the window
+    // instead of pushing better hits out of it.
+    const fetchLimit = Math.min(limit * 2, 100);
     try {
-      const raw = await this.vectors.query({ dense, sparse, filters, limit });
+      const raw = await this.vectors.query({ dense, sparse, filters, limit: fetchLimit });
       const hydrated = await this.hydrate(raw);
       return {
-        hits: hydrated,
+        hits: this.finalize(hydrated, limit),
         mode,
         degraded: mode !== 'hybrid',
         tookMs: Date.now() - t0,
       };
     } catch {
       // Qdrant unavailable → keyword fallback straight from Postgres.
-      const hits = await this.catalog.ftsSearch(q, filters, limit);
-      return { hits, mode: 'fts', degraded: true, tookMs: Date.now() - t0 };
+      const hits = await this.catalog.ftsSearch(q, filters, fetchLimit);
+      return { hits: this.finalize(hits, limit), mode: 'fts', degraded: true, tookMs: Date.now() - t0 };
     }
+  }
+
+  /**
+   * Shared staleness pass — BOTH the vector path and the FTS fallback flow
+   * through here, so degraded mode ranks by the same rules.
+   *
+   * archived → score penalty + label; aging → label only (an old runbook that
+   * simply never needed edits must not be buried); everything re-sorted.
+   */
+  private finalize(hits: SearchHit[], limit: number): SearchHit[] {
+    const penalty = this.ranking.archivedPenalty ?? DEFAULT_ARCHIVED_PENALTY;
+    const agingMonths = this.ranking.agingMonths ?? DEFAULT_AGING_MONTHS;
+    const nowMs = Date.now();
+    return hits
+      .map((h): SearchHit => {
+        if (h.sourceType !== 'doc') return h;
+        const { status, ageMonths } = deriveDocAge(h.occurredAt, agingMonths, nowMs);
+        if (h.docStatus === 'archived') {
+          return { ...h, score: h.score * penalty, ...(ageMonths != null ? { ageMonths } : {}) };
+        }
+        if (status === 'aging') return { ...h, docStatus: 'aging', ageMonths };
+        return ageMonths != null ? { ...h, ageMonths } : h;
+      })
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit);
   }
 
   /** Map Qdrant matches back to full entries; drops stale ids gracefully. */
@@ -95,6 +132,7 @@ export class SearchService {
         occurredAt: row.occurred_at?.toISOString?.() ?? undefined,
         sourcePath: row.source_path,
         sourceRef: row.source_ref ?? undefined,
+        ...(row.meta?.docStatus === 'archived' ? { docStatus: 'archived' as const } : {}),
       });
     }
     return hits;

@@ -98,6 +98,8 @@ export interface SearchFilters {
   kind?: EntryKind;
   since?: string;
   until?: string;
+  /** 'active' excludes archived docs; 'archived' targets them. Default: both. */
+  docStatus?: 'active' | 'archived';
 }
 
 export interface SearchHit {
@@ -112,6 +114,13 @@ export interface SearchHit {
   occurredAt?: string;
   sourcePath: string;
   sourceRef?: string;
+  /**
+   * Doc staleness: 'archived' (archive-style path, downranked) or 'aging'
+   * (old but untouched, label only). Absent = active or not a doc.
+   */
+  docStatus?: 'aging' | 'archived';
+  /** Months since last modification; only set for doc hits with a date. */
+  ageMonths?: number;
 }
 
 export interface SearchResult {

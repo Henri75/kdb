@@ -43,7 +43,7 @@ async function main() {
   }
   const vectors = new VectorStore(cfg.qdrantUrl, collection ?? 'kdbscope_unset');
 
-  const search = new SearchService(catalog, vectors, embedder);
+  const search = new SearchService(catalog, vectors, embedder, cfg.docs);
   const ask = new AskService(search, catalog, cfg.llm);
 
   const connection = new Redis(cfg.redisUrl, { maxRetriesPerRequest: null });

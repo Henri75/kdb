@@ -73,3 +73,15 @@ describe('multiple project roots', () => {
     expect(c.codeRoots[1]).toEqual({ container: '/mnt/other', host: '/b' });
   });
 });
+
+describe('docs staleness config', () => {
+  it('defaults: 12 months aging, 0.6 archived penalty', () => {
+    const c = parseConfig({});
+    expect(c.docs).toEqual({ agingMonths: 12, archivedPenalty: 0.6 });
+  });
+
+  it('reads KDB_DOCS_AGING_MONTHS and KDB_ARCHIVED_PENALTY', () => {
+    const c = parseConfig({ KDB_DOCS_AGING_MONTHS: '6', KDB_ARCHIVED_PENALTY: '0.3' });
+    expect(c.docs).toEqual({ agingMonths: 6, archivedPenalty: 0.3 });
+  });
+});

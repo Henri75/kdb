@@ -54,3 +54,18 @@ describe('buildQdrantFilter', () => {
     expect(buildQdrantFilter({ project: '', component: '' })).toBeUndefined();
   });
 });
+
+describe('buildQdrantFilter docStatus', () => {
+  it("'archived' targets archived docs directly", () => {
+    expect(buildQdrantFilter({ docStatus: 'archived' })).toEqual({
+      must: [{ key: 'doc_status', match: { value: 'archived' } }],
+    });
+  });
+
+  it("'active' excludes archived without hiding untagged entries", () => {
+    expect(buildQdrantFilter({ docStatus: 'active' })).toEqual({
+      must: [],
+      must_not: [{ key: 'doc_status', match: { value: 'archived' } }],
+    });
+  });
+});

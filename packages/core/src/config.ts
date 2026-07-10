@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DEFAULT_AGING_MONTHS, DEFAULT_ARCHIVED_PENALTY } from './docStatus.js';
 
 /**
  * Central configuration (§3.1: single source of truth, env-driven).
@@ -50,6 +51,13 @@ const schema = z.object({
     baseUrl: z.string().default('http://host.docker.internal:8181/v1'),
     apiKey: z.string().optional(),
   }),
+  /** Doc staleness knobs — tune ranking without ever reindexing. */
+  docs: z
+    .object({
+      agingMonths: z.coerce.number().int().min(1).default(DEFAULT_AGING_MONTHS),
+      archivedPenalty: z.coerce.number().min(0).max(1).default(DEFAULT_ARCHIVED_PENALTY),
+    })
+    .default({ agingMonths: DEFAULT_AGING_MONTHS, archivedPenalty: DEFAULT_ARCHIVED_PENALTY }),
   apiPort: z.coerce.number().int().default(8710),
   mcpPort: z.coerce.number().int().default(8711),
   apiUrl: z.string().default('http://api:8710'),
@@ -105,6 +113,10 @@ function fromEnv(env: NodeJS.ProcessEnv): AppConfig {
       model: opt(env.LLM_MODEL),
       baseUrl: opt(env.LLM_BASE_URL),
       apiKey: opt(env.LLM_API_KEY),
+    },
+    docs: {
+      agingMonths: opt(env.KDB_DOCS_AGING_MONTHS),
+      archivedPenalty: opt(env.KDB_ARCHIVED_PENALTY),
     },
     apiPort: opt(env.API_PORT),
     mcpPort: opt(env.MCP_PORT),

@@ -462,7 +462,7 @@ export class Catalog {
     if (!ids.length) return new Map();
     const r = await this.pool.query(
       `SELECT e.id, e.source_type, e.component, e.session_id, e.title, e.body,
-              e.occurred_at, e.source_path, e.source_ref, p.slug
+              e.occurred_at, e.source_path, e.source_ref, e.meta, p.slug
        FROM entries e JOIN projects p ON p.id = e.project_id WHERE e.id = ANY($1)`,
       [ids],
     );
@@ -490,10 +490,15 @@ export class Catalog {
       params.push(filters.kind);
       where += ` AND e.meta->>'kind' = $${params.length}`;
     }
+    if (filters.docStatus === 'archived') {
+      where += ` AND e.meta->>'docStatus' = 'archived'`;
+    } else if (filters.docStatus === 'active') {
+      where += ` AND e.meta->>'docStatus' IS DISTINCT FROM 'archived'`;
+    }
     params.push(limit);
     const r = await this.pool.query(
       `SELECT e.id, e.source_type, e.component, e.session_id, e.title, e.body,
-              e.occurred_at, e.source_path, e.source_ref, p.slug,
+              e.occurred_at, e.source_path, e.source_ref, e.meta, p.slug,
               ts_rank(e.fts, websearch_to_tsquery('english', $1)) AS rank
        FROM entries e JOIN projects p ON p.id = e.project_id
        WHERE ${where} ORDER BY rank DESC LIMIT $${params.length}`,
@@ -511,6 +516,8 @@ export class Catalog {
       occurredAt: row.occurred_at?.toISOString(),
       sourcePath: row.source_path,
       sourceRef: row.source_ref ?? undefined,
+      // Same decoration contract as the vector path (SearchService.finalize).
+      ...(row.meta?.docStatus === 'archived' ? { docStatus: 'archived' as const } : {}),
     }));
   }
 

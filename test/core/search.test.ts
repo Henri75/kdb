@@ -136,3 +136,84 @@ describe('SearchService degradation chain', () => {
     expect(r.hits.map((h) => h.entryId)).toEqual([1]);
   });
 });
+
+describe('SearchService doc staleness', () => {
+  const docRow = (id: number, opts: { archived?: boolean; occurredAt?: string } = {}) => ({
+    ...row(id),
+    source_type: 'doc',
+    source_path: '/x/docs/a.md',
+    occurred_at: opts.occurredAt ? new Date(opts.occurredAt) : new Date(),
+    meta: opts.archived ? { docStatus: 'archived' } : {},
+  });
+
+  it('downranks an archived doc below an equal-scored active one and labels it', async () => {
+    const rows = { 1: docRow(1, { archived: true }), 2: docRow(2) };
+    const vectors = {
+      // Archived arrives FIRST with a slightly better raw score.
+      query: async () => [
+        { entryId: 1, score: 0.9 },
+        { entryId: 2, score: 0.85 },
+      ],
+    } as any;
+    const s = new SearchService(fakeCatalog(rows), vectors, null);
+    const r = await s.search('q');
+    expect(r.hits.map((h) => h.entryId)).toEqual([2, 1]);
+    expect(r.hits[1]!.docStatus).toBe('archived');
+    expect(r.hits[1]!.score).toBeCloseTo(0.9 * 0.6);
+    expect(r.hits[0]!.docStatus).toBeUndefined();
+  });
+
+  it('labels old-but-not-archived docs as aging WITHOUT a rank penalty', async () => {
+    const twoYearsAgo = new Date(Date.now() - 2 * 365 * 24 * 3600 * 1000).toISOString();
+    const rows = { 1: docRow(1, { occurredAt: twoYearsAgo }), 2: docRow(2) };
+    const vectors = {
+      query: async () => [
+        { entryId: 1, score: 0.9 },
+        { entryId: 2, score: 0.85 },
+      ],
+    } as any;
+    const s = new SearchService(fakeCatalog(rows), vectors, null);
+    const r = await s.search('q');
+    // Aging keeps its rank.
+    expect(r.hits.map((h) => h.entryId)).toEqual([1, 2]);
+    expect(r.hits[0]!.docStatus).toBe('aging');
+    expect(r.hits[0]!.ageMonths).toBeGreaterThanOrEqual(23);
+    expect(r.hits[0]!.score).toBe(0.9);
+  });
+
+  it('never labels non-doc sources, however old', async () => {
+    const oldCommit = { ...row(1), occurred_at: new Date('2020-01-01') };
+    const vectors = { query: async () => [{ entryId: 1, score: 0.9 }] } as any;
+    const s = new SearchService(fakeCatalog({ 1: oldCommit }), vectors, null);
+    const r = await s.search('q');
+    expect(r.hits[0]!.docStatus).toBeUndefined();
+  });
+
+  it('decorates and downranks on the FTS fallback path too', async () => {
+    const vectors = {
+      query: async () => {
+        throw new Error('qdrant down');
+      },
+    } as any;
+    const ftsHits = [
+      { entryId: 1, score: 0.9, sourceType: 'doc', docStatus: 'archived', occurredAt: new Date().toISOString() },
+      { entryId: 2, score: 0.85, sourceType: 'doc', occurredAt: new Date().toISOString() },
+    ];
+    const s = new SearchService(fakeCatalog({}, ftsHits as any), vectors, null);
+    const r = await s.search('q');
+    expect(r.mode).toBe('fts');
+    expect(r.hits.map((h) => h.entryId)).toEqual([2, 1]);
+    expect(r.hits[1]!.score).toBeCloseTo(0.9 * 0.6);
+  });
+
+  it('honors a custom penalty and aging threshold', async () => {
+    const rows = { 1: docRow(1, { archived: true }) };
+    const vectors = { query: async () => [{ entryId: 1, score: 1 }] } as any;
+    const s = new SearchService(fakeCatalog(rows), vectors, null, {
+      archivedPenalty: 0.1,
+      agingMonths: 1,
+    });
+    const r = await s.search('q');
+    expect(r.hits[0]!.score).toBeCloseTo(0.1);
+  });
+});

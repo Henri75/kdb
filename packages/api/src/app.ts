@@ -122,6 +122,7 @@ export function buildApp(deps: ApiDeps): Hono {
         kind: (c.req.query('kind') as EntryKind) || undefined,
         since: c.req.query('since') || undefined,
         until: c.req.query('until') || undefined,
+        docStatus: (c.req.query('docStatus') as 'active' | 'archived') || undefined,
       },
       Math.min(Number(c.req.query('limit') ?? 20), 100),
     );
@@ -148,7 +149,7 @@ export function buildApp(deps: ApiDeps): Hono {
     if (!question) return c.json({ error: 'question is required' }, 400);
     const result = await deps.ask.ask(
       question,
-      { project: body.project, sourceType: body.source, component: body.component, kind: body.kind },
+      { project: body.project, sourceType: body.source, component: body.component, kind: body.kind, docStatus: body.docStatus },
       Math.min(Number(body.k ?? 12), 30),
       sanitizeHistory(body.history),
     );
@@ -168,7 +169,7 @@ export function buildApp(deps: ApiDeps): Hono {
 
     const events = deps.ask.askStream(
       question,
-      { project: body.project, sourceType: body.source, component: body.component, kind: body.kind },
+      { project: body.project, sourceType: body.source, component: body.component, kind: body.kind, docStatus: body.docStatus },
       Math.min(Number(body.k ?? 12), 30),
       sanitizeHistory(body.history),
     );
