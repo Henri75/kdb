@@ -86,9 +86,40 @@ describe('listKdbFiles', () => {
 
 describe('listDocFiles', () => {
   it('collects root md + docs tree, ignores node_modules', () => {
-    const files = listDocFiles(join(root, 'DeepCast'));
-    expect(files.some((f) => f.endsWith('README.md'))).toBe(true);
-    expect(files.some((f) => f.includes('docs/adr'))).toBe(true);
-    expect(files.some((f) => f.includes('node_modules'))).toBe(false);
+    const { files, dropped } = listDocFiles(join(root, 'DeepCast'));
+    const paths = files.map((f) => f.path);
+    expect(paths.some((p) => p.endsWith('README.md'))).toBe(true);
+    expect(paths.some((p) => p.includes('docs/adr'))).toBe(true);
+    expect(paths.some((p) => p.includes('node_modules'))).toBe(false);
+    expect(dropped).toBe(0);
+  });
+
+  it('flags archive-style locations, relative to the project root', () => {
+    mkdirSync(join(root, 'DeepCast/docs/Previous/archive'), { recursive: true });
+    writeFileSync(join(root, 'DeepCast/docs/Previous/archive/old-notes.md'), 'x');
+    const { files } = listDocFiles(join(root, 'DeepCast'));
+    const flagged = files.find((f) => f.path.includes('Previous/archive'));
+    expect(flagged?.archived).toBe(true);
+    expect(files.find((f) => f.path.includes('docs/adr'))?.archived).toBe(false);
+    // The project root's own name must never trigger the classifier.
+    mkdirSync(join(root, 'Old/docs'), { recursive: true });
+    writeFileSync(join(root, 'Old/docs/current.md'), 'x');
+    expect(listDocFiles(join(root, 'Old')).files[0]!.archived).toBe(false);
+  });
+
+  it('reports how many files the cap dropped instead of hiding them', () => {
+    mkdirSync(join(root, 'Capped/docs'), { recursive: true });
+    for (let i = 0; i < 12; i++) writeFileSync(join(root, `Capped/docs/f${i}.md`), 'x');
+    const { files, dropped } = listDocFiles(join(root, 'Capped'), 10);
+    expect(files).toHaveLength(10);
+    expect(dropped).toBe(2);
+  });
+
+  it('walks deeper than the old depth-4 limit', () => {
+    mkdirSync(join(root, 'Deep/docs/a/b/c/d/e'), { recursive: true });
+    writeFileSync(join(root, 'Deep/docs/a/b/c/d/e/deep.md'), 'x');
+    expect(listDocFiles(join(root, 'Deep')).files.some((f) => f.path.endsWith('deep.md'))).toBe(
+      true,
+    );
   });
 });

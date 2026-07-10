@@ -106,4 +106,13 @@ describe('indexEntries', () => {
     expect(point.dense).toEqual([1, 2, 3]);
     expect(point.sparse.indices.length).toBeGreaterThan(0);
   });
+
+  it('carries doc_status into the payload for archived docs', async () => {
+    const { deps, upserted } = makeDeps();
+    const e = entry(9, 'short body');
+    e.entry.sourceType = 'doc';
+    e.entry.meta = { docStatus: 'archived' };
+    await indexEntries(deps, [e]);
+    expect((upserted[0] as any[])[0].payload.doc_status).toBe('archived');
+  });
 });

@@ -34,4 +34,15 @@ describe('parseMarkdownDoc', () => {
     expect(entries.every((e) => !e.body.includes('frontmatter'))).toBe(true);
     expect(entries[0]!.occurredAt).toBe('2026-07-03T12:00:00Z');
   });
+
+  it('carries no docStatus by default', () => {
+    const entries = parseMarkdownDoc(DOC, ctx);
+    expect(entries.every((e) => e.meta?.docStatus === undefined)).toBe(true);
+  });
+
+  it('stamps meta.docStatus=archived when the scanner flagged the file', () => {
+    const entries = parseMarkdownDoc(DOC, { ...ctx, archived: true });
+    expect(entries.length).toBeGreaterThan(0);
+    expect(entries.every((e) => e.meta?.docStatus === 'archived')).toBe(true);
+  });
 });

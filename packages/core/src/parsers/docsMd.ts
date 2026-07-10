@@ -7,6 +7,8 @@ export interface DocParseCtx {
   sourcePath: string;
   /** File mtime (ISO) — docs carry no reliable inline date. */
   modifiedAt?: string;
+  /** File lives under an archive-style path; stamps meta.docStatus. */
+  archived?: boolean;
 }
 
 const MIN_SECTION_CHARS = 80;
@@ -41,6 +43,8 @@ export function parseMarkdownDoc(text: string, ctx: DocParseCtx): Entry[] {
       occurredAt: ctx.modifiedAt,
       sourcePath: ctx.sourcePath,
       sourceRef: `#${s.heading.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+      // 'active' is implied by absence — meta stays empty for the common case.
+      ...(ctx.archived ? { meta: { docStatus: 'archived' } } : {}),
     });
   }
   return entries;

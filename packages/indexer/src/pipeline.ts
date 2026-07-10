@@ -4,6 +4,7 @@ import { promisify } from 'node:util';
 import { basename } from 'node:path';
 import {
   Catalog,
+  DOCS_PARSER_VERSION,
   GIT_LOG_FORMAT,
   VectorStore,
   chunk,
@@ -105,6 +106,8 @@ export async function indexEntries(
           session_id: b.entry.sessionId,
           // Lets search ask for insights/summaries/actions directly.
           kind: (b.entry.meta?.kind as string | undefined) ?? undefined,
+          // Archived docs are downranked at query time; absence means active.
+          doc_status: (b.entry.meta?.docStatus as string | undefined) ?? undefined,
           occurred_at: b.entry.occurredAt,
         },
       })),
@@ -298,25 +301,51 @@ async function scanDocs(
   progress?: ProgressFn,
 ): Promise<number> {
   let indexed = 0;
-  for (const path of listDocFiles(job.rootPath)) {
+  const { files, dropped } = listDocFiles(job.rootPath);
+  // No silent caps: truncation must be visible in the indexer logs.
+  if (dropped > 0) {
+    console.warn(
+      `[indexer] ${job.projectSlug}: docs cap reached — ${dropped} file(s) NOT indexed`,
+    );
+  }
+
+  // Classification semantics changed since these files were last scanned →
+  // walk everything once to sync docStatus, even files whose bytes are
+  // unchanged (scan state would skip them forever otherwise).
+  const verKey = `docs_parser_version:${projectId}`;
+  const storedVersion = await deps.catalog.getSetting(verKey).catch(() => null);
+  const syncAll = storedVersion !== String(DOCS_PARSER_VERSION);
+
+  for (const { path, archived } of files) {
     try {
       const stat = statSync(path);
       const state = await deps.catalog.getScanState(projectId, 'doc', path);
-      if (!fileChanged(stat, state, job.full)) continue;
-      const entries = parseMarkdownDoc(readFileSync(path, 'utf8'), {
-        projectSlug: job.projectSlug,
-        sourcePath: path,
-        modifiedAt: new Date(stat.mtimeMs).toISOString(),
-      });
-      const inserted = await deps.catalog.insertEntries(projectId, entries);
-      indexed += await indexEntries(deps, inserted, (c) => progress?.({ file: path, chunks: c }));
-      await deps.catalog.setScanState(projectId, 'doc', path, {
-        mtimeMs: Math.trunc(stat.mtimeMs), size: stat.size, byteOffset: stat.size,
-      });
+      const changed = fileChanged(stat, state, job.full);
+      if (changed) {
+        const entries = parseMarkdownDoc(readFileSync(path, 'utf8'), {
+          projectSlug: job.projectSlug,
+          sourcePath: path,
+          modifiedAt: new Date(stat.mtimeMs).toISOString(),
+          archived,
+        });
+        const inserted = await deps.catalog.insertEntries(projectId, entries);
+        indexed += await indexEntries(deps, inserted, (c) => progress?.({ file: path, chunks: c }));
+        await deps.catalog.setScanState(projectId, 'doc', path, {
+          mtimeMs: Math.trunc(stat.mtimeMs), size: stat.size, byteOffset: stat.size,
+        });
+      }
+      // A re-parse only inserts NEW dedup keys, so rows that already existed
+      // keep their old meta; fix them in place (Postgres + vector payload,
+      // no re-embedding). Runs for changed files and, on version bump, all.
+      if (changed || syncAll) {
+        const ids = await deps.catalog.syncDocStatus(projectId, path, archived);
+        if (ids.length) await deps.vectors.setDocStatus(ids, archived ? 'archived' : null);
+      }
     } catch (e) {
       await deps.catalog.logError(projectId, path, 'doc-parse', (e as Error).message);
     }
   }
+  await deps.catalog.setSetting(verKey, String(DOCS_PARSER_VERSION)).catch(() => {});
   return indexed;
 }
 

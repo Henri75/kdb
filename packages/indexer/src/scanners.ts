@@ -1,7 +1,7 @@
 import { readdirSync, statSync, existsSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import type { DiscoveredProject, SourceType } from '@kdbscope/core';
-import { slugify } from '@kdbscope/core';
+import { isArchivedDocPath, slugify } from '@kdbscope/core';
 
 /**
  * Filesystem discovery. Everything here is read-only and defensive: a
@@ -119,24 +119,47 @@ export function listKdbFiles(projectRoot: string): KdbFile[] {
   return files;
 }
 
-/** Doc files: README + docs/ + adr, shallow walk, capped. */
-export function listDocFiles(projectRoot: string, cap = 400): string[] {
-  const out: string[] = [];
+export interface DocFile {
+  path: string;
+  /** Lives under an archive-style location (docs/archive, _legacy, Previous…). */
+  archived: boolean;
+}
+
+/**
+ * Doc files: README + root *.md + docs/ tree. The cap is a runaway guard, not
+ * a quota — files beyond it are counted in `dropped` so the caller can warn
+ * instead of truncating silently (DeepCast once lost 80+ files to a cap of 400).
+ */
+export function listDocFiles(
+  projectRoot: string,
+  cap = 2000,
+): { files: DocFile[]; dropped: number } {
+  const files: DocFile[] = [];
+  let dropped = 0;
+  const add = (p: string) => {
+    if (files.length >= cap) {
+      dropped++;
+      return;
+    }
+    // Classified on the project-relative path: a project ROOT named "Old"
+    // must not archive its whole tree.
+    files.push({ path: p, archived: isArchivedDocPath(p.slice(projectRoot.length + 1)) });
+  };
   const walk = (dir: string, depth: number) => {
-    if (out.length >= cap || depth > 4) return;
+    if (depth > 6) return;
     for (const name of safeReaddir(dir)) {
       if (name.startsWith('.') || IGNORED_DIRS.has(name) || name === 'kdb') continue;
       const p = join(dir, name);
       if (isDir(p)) walk(p, depth + 1);
-      else if (name.endsWith('.md') && out.length < cap) out.push(p);
+      else if (name.endsWith('.md')) add(p);
     }
   };
   // Root-level *.md + docs tree.
   for (const name of safeReaddir(projectRoot)) {
-    if (name.endsWith('.md')) out.push(join(projectRoot, name));
+    if (name.endsWith('.md')) add(join(projectRoot, name));
   }
   if (isDir(join(projectRoot, 'docs'))) walk(join(projectRoot, 'docs'), 0);
-  return out.slice(0, cap);
+  return { files, dropped };
 }
 
 /** All *.jsonl session transcripts inside a Claude project dir. */

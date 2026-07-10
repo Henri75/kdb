@@ -256,6 +256,35 @@ export class Catalog {
     return out;
   }
 
+  /**
+   * Bring stored doc entries of one file in line with its current archive
+   * classification. Needed because insertEntries is ON CONFLICT DO NOTHING:
+   * a re-parse never touches rows that already exist. Returns the ids that
+   * actually changed so the caller can patch their vector payloads.
+   */
+  async syncDocStatus(
+    projectId: number,
+    sourcePath: string,
+    archived: boolean,
+  ): Promise<number[]> {
+    const r = archived
+      ? await this.pool.query(
+          `UPDATE entries SET meta = meta || '{"docStatus":"archived"}'::jsonb
+           WHERE project_id=$1 AND source_path=$2 AND source_type='doc'
+             AND meta->>'docStatus' IS DISTINCT FROM 'archived'
+           RETURNING id`,
+          [projectId, sourcePath],
+        )
+      : await this.pool.query(
+          `UPDATE entries SET meta = meta - 'docStatus'
+           WHERE project_id=$1 AND source_path=$2 AND source_type='doc'
+             AND meta ? 'docStatus'
+           RETURNING id`,
+          [projectId, sourcePath],
+        );
+    return r.rows.map((row) => row.id);
+  }
+
   async upsertSession(projectId: number, meta: SessionMeta, sourcePath: string): Promise<void> {
     await this.pool.query(
       `INSERT INTO sessions (id, project_id, title, cwd, started_at, ended_at, prompt_count, action_count, files_touched, source_path)
@@ -372,7 +401,7 @@ export class Catalog {
   async entriesAfter(cursor: number, limit: number): Promise<(Entry & { id: number })[]> {
     const r = await this.pool.query(
       `SELECT e.id, e.source_type, e.component, e.session_id, e.title, e.body,
-              e.occurred_at, e.source_path, e.source_ref, p.slug
+              e.occurred_at, e.source_path, e.source_ref, e.meta, p.slug
        FROM entries e JOIN projects p ON p.id = e.project_id
        WHERE e.id > $1 ORDER BY e.id ASC LIMIT $2`,
       [cursor, limit],
@@ -388,6 +417,8 @@ export class Catalog {
       occurredAt: row.occurred_at?.toISOString(),
       sourcePath: row.source_path,
       sourceRef: row.source_ref ?? undefined,
+      // Without meta a collection rebuild would drop kind/doc_status payloads.
+      meta: row.meta ?? undefined,
     }));
   }
 

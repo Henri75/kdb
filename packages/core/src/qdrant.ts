@@ -24,6 +24,8 @@ export interface VectorPoint {
     session_id?: string;
     /** Message classification (insight, summary, action…) for session entries. */
     kind?: string;
+    /** 'archived' for docs under archive-style paths; absent means active. */
+    doc_status?: string;
     occurred_at?: string;
   };
 }
@@ -84,17 +86,33 @@ export class VectorStore {
 
   async ensure(denseDim: number): Promise<void> {
     const existing = await this.client.getCollections();
-    if (existing.collections.some((c) => c.name === this.collection)) return;
-    await this.client.createCollection(this.collection, {
-      vectors: { dense: { size: denseDim, distance: 'Cosine' } },
-      sparse_vectors: { sparse: { modifier: 'idf' } },
-    });
-    for (const field of ['project', 'source_type', 'component', 'session_id', 'kind'] as const) {
-      await this.client.createPayloadIndex(this.collection, {
-        field_name: field,
-        field_schema: 'keyword',
-        wait: true,
+    if (!existing.collections.some((c) => c.name === this.collection)) {
+      await this.client.createCollection(this.collection, {
+        vectors: { dense: { size: denseDim, distance: 'Cosine' } },
+        sparse_vectors: { sparse: { modifier: 'idf' } },
       });
+    }
+    // Runs on existing collections too: payload fields added after a
+    // collection was created (doc_status, entry_id) still need their index.
+    // Re-creating an existing index is a cheap no-op for Qdrant.
+    const fields: [string, 'keyword' | 'integer'][] = [
+      ['project', 'keyword'],
+      ['source_type', 'keyword'],
+      ['component', 'keyword'],
+      ['session_id', 'keyword'],
+      ['kind', 'keyword'],
+      ['doc_status', 'keyword'],
+      // Integer index so setDocStatus can address points by entry id.
+      ['entry_id', 'integer'],
+    ];
+    for (const [field, schema] of fields) {
+      await this.client
+        .createPayloadIndex(this.collection, {
+          field_name: field,
+          field_schema: schema,
+          wait: true,
+        })
+        .catch(() => {}); // already indexed
     }
   }
 
@@ -131,6 +149,26 @@ export class VectorStore {
             payload: p.payload,
           })),
         }),
+      );
+    }
+  }
+
+  /**
+   * Flip doc_status on every chunk of the given entries, in place — no
+   * re-embedding. Used when a file's archive classification changes (or the
+   * parser version bumps) but its content did not.
+   */
+  async setDocStatus(entryIds: number[], status: 'archived' | null): Promise<void> {
+    for (let i = 0; i < entryIds.length; i += 500) {
+      const filter = { must: [{ key: 'entry_id', match: { any: entryIds.slice(i, i + 500) } }] };
+      await withRetry(() =>
+        status
+          ? this.client.setPayload(this.collection, {
+              payload: { doc_status: status },
+              filter,
+              wait: false,
+            })
+          : this.client.deletePayload(this.collection, { keys: ['doc_status'], filter, wait: false }),
       );
     }
   }
