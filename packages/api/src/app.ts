@@ -87,15 +87,20 @@ export function buildApp(deps: ApiDeps): Hono {
    * too slow for the footer that polls every 30 seconds.
    */
   app.get('/api/dashboard', async (c) => {
-    const [stats, chunks, queue, storage, health, vectors, sessions] = await Promise.all([
-      deps.catalog.stats(),
-      deps.vectorCount(),
-      deps.queueCounts(),
-      deps.storage(),
-      deps.health(),
-      deps.vectorStats(),
-      deps.catalog.countSessions().catch(() => 0),
-    ]);
+    const [stats, chunks, queue, storage, health, vectors, sessions, sourceDetail, activity, runs, archivedDocs] =
+      await Promise.all([
+        deps.catalog.stats(),
+        deps.vectorCount(),
+        deps.queueCounts(),
+        deps.storage(),
+        deps.health(),
+        deps.vectorStats(),
+        deps.catalog.countSessions().catch(() => 0),
+        deps.catalog.sourceDetail().catch(() => []),
+        deps.catalog.indexingActivity().catch(() => []),
+        deps.catalog.recentRuns().catch(() => []),
+        deps.catalog.archivedDocsCount().catch(() => 0),
+      ]);
     const pending = queue ? (queue.waiting ?? 0) + (queue.active ?? 0) + (queue.delayed ?? 0) : null;
     return c.json({
       ...stats,
@@ -107,6 +112,10 @@ export function buildApp(deps: ApiDeps): Hono {
       storage,
       health,
       vectors,
+      sourceDetail,
+      activity,
+      runs,
+      archivedDocs,
     });
   });
 

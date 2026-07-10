@@ -23,6 +23,26 @@ function makeDeps(overrides: Partial<ApiDeps> = {}): ApiDeps {
       recentErrors: async () => [{ id: 1, message: 'boom' }],
       getSetting: async () => null,
       countSessions: async () => 485,
+      sourceDetail: async () => [
+        {
+          sourceType: 'doc',
+          entries: 14000,
+          files: 2400,
+          volumeChars: 52_000_000,
+          lastIndexedAt: '2026-07-10T22:00:00Z',
+        },
+      ],
+      indexingActivity: async () => [{ day: '2026-07-10', sourceType: 'doc', count: 120 }],
+      recentRuns: async () => [
+        {
+          id: 9,
+          kind: 'scheduled',
+          startedAt: '2026-07-10T22:00:00Z',
+          finishedAt: '2026-07-10T22:00:05Z',
+          stats: { enqueued: 44 },
+        },
+      ],
+      archivedDocsCount: async () => 812,
     } as any,
     search: { search: async () => ({ hits: [], mode: 'hybrid', degraded: false, tookMs: 5 }) } as any,
     ask: { ask: async () => ({ answer: '42 [1]', sources: [], model: 'm', degraded: false }) } as any,
@@ -88,6 +108,24 @@ describe('api routes', () => {
       expect(body.health).toEqual({ postgres: true, qdrant: true, redis: true, ollama: true });
       expect(body.vectors).toMatchObject({ points: 157_369, vectors: 314_201 });
       expect(body.storage.postgresBytes).toBe(245_298_879);
+    });
+
+    it('carries per-source detail, indexing activity, runs and archived-doc count', async () => {
+      const body = await (await buildApp(makeDeps()).request('/api/dashboard')).json();
+      expect(body.sourceDetail[0]).toMatchObject({ sourceType: 'doc', files: 2400 });
+      expect(body.activity).toEqual([{ day: '2026-07-10', sourceType: 'doc', count: 120 }]);
+      expect(body.runs[0]).toMatchObject({ kind: 'scheduled', stats: { enqueued: 44 } });
+      expect(body.archivedDocs).toBe(812);
+    });
+
+    it('still renders when the new detail queries fail', async () => {
+      const deps = makeDeps();
+      (deps.catalog as any).sourceDetail = async () => {
+        throw new Error('pg hiccup');
+      };
+      const body = await (await buildApp(deps).request('/api/dashboard')).json();
+      expect(body.sourceDetail).toEqual([]);
+      expect(body.projects).toBe(2);
     });
 
     it('surfaces an orphaned collection left behind by a model switch', async () => {
