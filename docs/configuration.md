@@ -3,6 +3,7 @@
 # Configuration
 
 ## Revision History
+- 2026-07-10 22:24 UTC — Doc staleness knobs: `KDB_DOCS_AGING_MONTHS`, `KDB_ARCHIVED_PENALTY`.
 - 2026-07-10 00:00 UTC — QDRANT_STORAGE_PATH for dashboard disk usage.
 - 2026-07-09 16:00 UTC — Multiple project roots; why host paths are passed into the containers.
 - 2026-07-09 01:50 UTC — Ollama-preferred `auto` + version floor, WORKER_CONCURRENCY default 2, host-path passthrough, model-switch rebuild.
@@ -45,6 +46,19 @@ but rarely need to be.
 |---|---|---|
 | `SCAN_INTERVAL_MIN` | `5` | incremental scan cadence |
 | `WORKER_CONCURRENCY` | `2` | parallel scan jobs. Every job embeds, and a local Ollama serves one request at a time — more workers only deepen its queue. Raise for a remote/batched endpoint. |
+
+## Doc staleness
+
+Docs under archive-style paths (`docs/archive`, `_legacy`, `Previous`, `old`,
+`deprecated`…) are indexed like everything else but downranked and labeled in
+results; docs merely untouched for a long time get an `aging` label with no
+rank penalty. All of it is query-time behavior — changing these never requires
+a reindex.
+
+| Var | Default | Meaning |
+|---|---|---|
+| `KDB_DOCS_AGING_MONTHS` | `12` | age (months since file mtime) past which an unarchived doc is labeled `aging` |
+| `KDB_ARCHIVED_PENALTY` | `0.6` | multiplier applied to the search score of archived doc hits (0–1; lower buries them deeper) |
 
 ## Embeddings
 

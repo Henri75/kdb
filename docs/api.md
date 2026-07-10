@@ -3,6 +3,7 @@
 # REST API
 
 ## Revision History
+- 2026-07-10 22:24 UTC — `docStatus` filter on search/ask; hits carry `docStatus`/`ageMonths`; dashboard adds `sourceDetail`, `activity`, `runs`, `archivedDocs`.
 - 2026-07-10 00:00 UTC — /api/dashboard: storage, service health, vector stats.
 - 2026-07-09 22:25 UTC — Conversation history on both Ask endpoints; `kind` filter.
 - 2026-07-09 01:50 UTC — Streaming Ask (SSE), source deep links, richer /api/stats.
@@ -14,9 +15,9 @@ Base: `http://127.0.0.1:8710`. JSON everywhere. No auth (localhost-only tool).
 |---|---|---|---|
 | GET | `/api/health` | — | `{ok}` |
 | GET | `/api/stats` | — | counts, per-source breakdown, embedder, collection, lastRunAt, `queue`, `pending`, `backfill`, `recentErrors` |
-| GET | `/api/dashboard` | — | everything in `/api/stats` plus `sessions`, `storage`, `health`, `vectors` |
-| GET | `/api/search` | `q` (required), `project`, `source`, `component`, `kind`, `since`, `until`, `limit` | `{hits[], mode, degraded, tookMs}`; each hit carries `hostPath` + `editorUrl` |
-| POST | `/api/ask` | `{question, project?, source?, component?, kind?, k?, history?}` | `{answer, sources[], model, degraded}` |
+| GET | `/api/dashboard` | — | everything in `/api/stats` plus `sessions`, `storage`, `health`, `vectors`, `sourceDetail` (per-source entries/files/volume/last-indexed), `activity` (30-day per-day per-source counts), `runs`, `archivedDocs` |
+| GET | `/api/search` | `q` (required), `project`, `source`, `component`, `kind`, `since`, `until`, `docStatus` (`active` excludes archived docs, `archived` targets them), `limit` | `{hits[], mode, degraded, tookMs}`; each hit carries `hostPath` + `editorUrl`, and doc hits may carry `docStatus` (`archived` = downranked, `aging` = label only) + `ageMonths` |
+| POST | `/api/ask` | `{question, project?, source?, component?, kind?, docStatus?, k?, history?}` | `{answer, sources[], model, degraded}` |
 | POST | `/api/ask/stream` | same as `/api/ask` | SSE: `sources` → `delta`* → `done` |
 | GET | `/api/projects` | — | projects with entry counts |
 | GET | `/api/projects/:slug/timeline` | `limit`, `before` (ISO cursor), `sources` (csv) | `{items[]}` newest first |

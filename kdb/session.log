@@ -54,3 +54,11 @@
 
 **AI Response Summary:**
 > Added shared formatters — compact counts (82k) always paired with the exact value on hover, binary byte units, durations, relative times, and a plural() that never renders "1 prompts" — and applied them across the sidebar, footer, backfill bar, sessions and components; the CLI got thousands separators instead, since a terminal line has room for precision. Built a new /api/dashboard (kept separate from the /api/stats the footer polls, because it walks Qdrant's storage tree and probes every dependency; 828ms cold, 64ms warm) and made an Overview the UI landing page: headline counts, per-service health, per-store disk/memory, a source breakdown, and a callout for vectors orphaned by an embedding-model change — 1.02 GB on this machine. Qdrant has no disk-usage API (its telemetry reports 0, which is worse than missing), so its volume is mounted read-only into the API rather than exposing the Docker socket. Verified live against real numbers and checked the documented reclaim command on a scratch collection instead of the user's data. 222 -> 260 tests.
+---
+### [2026-07-10 22:26 UTC]
+
+**User Prompt Summary:**
+> Ensure every project's docs/ folder is indexed and design how to handle outdated docs without losing information or corrupting research; then self-review, implement, test, document, commit and push, and make the stats page report useful volumes, counts, index sizes and indexing activity.
+
+**AI Response Summary:**
+> Designed and shipped the staleness model (archived stored from path conventions, aging derived at query time, downrank+label everywhere incl. Ask/MCP/CLI/UI, version-forced payload backfill, docs cap 2000 with loud truncation) plus a dashboard overhaul (30-day activity chart, per-source files/volume/last-indexed, recent runs). 310 tests green; docs + ADR updated; committed and pushed.

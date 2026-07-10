@@ -237,3 +237,37 @@
 
 **Status:**
 - Completed
+---
+### [2026-07-10] - Docs staleness handling + full docs coverage + dashboard activity stats
+
+**Objective:**
+- Index every project's docs/ completely and stop outdated docs from polluting search results and Ask research, without ever losing information; then make the overview dashboard report real inventory and indexing activity.
+
+**Summary of Work:**
+- Coverage: listDocFiles cap 400→2000, depth 4→6, returns {files, dropped}; scanDocs warns per project when the cap drops files (DeepCast was silently losing 80+ of its 481 docs).
+- Staleness: archived = path conventions (archive/, _archive/, _legacy/, Previous/, old/, deprecated/, obsolete/, superseded/, outdated/, backup(s)/, bak + filename stems), computed at scan time, stored in entry meta jsonb + qdrant doc_status payload (new keyword index). aging = derived at query time from occurredAt vs KDB_DOCS_AGING_MONTHS (12) — never stored.
+- Ranking: SearchService.finalize() shared by hybrid path AND fts fallback: archived score × KDB_ARCHIVED_PENALTY (0.6) + badge, aging label only, 2× over-fetch, re-sort. docStatus filter (active|archived) through Qdrant must/must_not, catalog FTS, REST (docStatus), UI select, kdbs --doc-status, MCP doc_status.
+- Ask: context blocks labeled [ARCHIVED — n mo old]/[AGING — …]; system prompt says prefer fresh, disclose reliance, trust newer on conflict.
+- Backfill: DOCS_PARSER_VERSION per-project setting; on mismatch scanDocs syncs unchanged files via catalog.syncDocStatus (jsonb update RETURNING id) + vectors.setDocStatus (setPayload/deletePayload by entry_id index) — no re-parse, no re-embed. entriesAfter now selects meta so collection rebuilds keep payloads.
+- Dashboard: catalog sourceDetail/indexingActivity/recentRuns/archivedDocsCount; /api/dashboard exposes them best-effort; UI gets 30-day stacked activity bars (source color families, hover breakdown, idle hairlines), files/volume/last-indexed per source, recent runs; kdbs status gets activity today/7d + per-source columns.
+
+**Key Decisions & Rationale:**
+- Judge at query time, never at index time: deleting/skipping is the only irreversible act; penalty/threshold/patterns are config, tunable with zero reindex. ADR docs/adr/20260710-docs-staleness-query-time.md.
+- aging is derived, not stored: scan state skips unchanged files forever, so a stored flag would freeze on index day (caught in spec self-review).
+- One finalize() for both search paths: degraded FTS mode must rank by the same rules or Qdrant outages silently change result semantics.
+
+**Code/Files Modified:**
+- packages/core/src/docStatus.ts (new), parsers/docsMd.ts, types.ts, qdrant.ts, catalog.ts, search.ts, ask.ts, config.ts, index.ts
+- packages/indexer/src/scanners.ts, pipeline.ts
+- packages/api/src/app.ts, main.ts
+- packages/ui/src/types.ts, views/SearchView.tsx, views/DashboardView.tsx
+- packages/cli/src/main.ts; packages/mcp/src/tools.ts
+- test/: docStatus, scanDocs (new), docsMd, scanners, indexEntries, qdrantFilter, search, ask, config, routes, mcp tools
+- docs/: architecture.md, api.md, configuration.md, adr/20260710-docs-staleness-query-time.md, superpowers spec+plan
+
+**Outcomes & Lessons Learned:**
+- **What Worked:** setPayload by an integer entry_id payload index reclassifies thousands of chunks in place — the whole backfill problem disappears without touching the embedder. 310 tests green.
+- **What Failed:** first design stored aging at scan time (would drift — unchanged files never rescan) and put the penalty only on the vector path (fts fallback would bypass it); both caught in self-review before code.
+
+**Status:**
+- Completed

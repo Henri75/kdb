@@ -3,6 +3,7 @@
 # Architecture
 
 ## Revision History
+- 2026-07-10 22:24 UTC — Doc staleness: archived/aging model, query-time ranking, version-forced backfill.
 - 2026-07-09 22:25 UTC — Message kinds; distiller keeps all prose + records actions; EXTRACTION_SCHEME.
 - 2026-07-09 16:00 UTC — Host vs container paths; multi-root discovery; PROJECT_GROUPING.
 - 2026-07-09 01:20 UTC — Initial version.
@@ -92,6 +93,35 @@ degradation: hybrid → sparse-only (embedder down) → Postgres FTS (qdrant dow
 
 Ask mode: top-k retrieval → numbered context blocks → OpenAI-compatible
 `chat/completions` (G2P preset or any endpoint) → answer with `[n]` citations.
+
+## Doc staleness
+
+docs/ folders accumulate outdated material. KDBScope never excludes it — the
+index would silently lose recall — it classifies and lets ranking + labels do
+the judging (ADR: `docs/adr/20260710-docs-staleness-query-time.md`):
+
+- **archived** — the file's project-relative path crosses an archive-style
+  segment (`archive`, `_archive`, `legacy`, `old`, `deprecated`, `previous`,
+  `obsolete`, `superseded`, `outdated`, `backup`, `bak`; filename-stem tokens
+  count too). Computed at scan time, stored in entry `meta` and as `doc_status`
+  in the Qdrant payload. Filterable (`docStatus=active|archived`).
+- **aging** — not archived, but older than `KDB_DOCS_AGING_MONTHS` (12). Derived
+  at **query time** from `occurredAt`; deliberately never stored, because
+  unchanged files are never rescanned and a stored flag would freeze.
+
+`SearchService.finalize()` is the single staleness pass: it runs on the hybrid
+path *and* the FTS fallback, multiplies archived scores by
+`KDB_ARCHIVED_PENALTY` (0.6), attaches labels, re-sorts (2× over-fetch so
+demoted hits can actually fall out). Aging is a label only — an old runbook
+that never needed edits must not be buried. Ask context blocks arrive labeled
+(`[ARCHIVED — 20 mo old]`) and the system prompt tells the model to prefer
+fresh sources and disclose reliance on stale ones.
+
+Reclassification without re-embedding: `DOCS_PARSER_VERSION` is recorded per
+project; on mismatch the next docs scan walks unchanged files once, updates
+`meta.docStatus` in Postgres and patches the Qdrant payload via `setPayload`
+on the `entry_id` index. The docs walk covers 2000 files at depth 6 per
+project, and logs a per-project warning when the cap drops anything.
 
 ## Host paths vs container paths
 

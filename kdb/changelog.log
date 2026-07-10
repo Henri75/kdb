@@ -15,3 +15,5 @@
 - [COMPLETED] - [2026-07-10 00:05 UTC] - [Feature] - [kdbscope] - [Overview dashboard at /api/dashboard and as the UI landing page: projects/documents/chunks/sessions, service health, per-store disk usage, source breakdown, and a callout for vectors orphaned by an embedding-model change (1.02 GB here)]
 - [COMPLETED] - [2026-07-10 00:05 UTC] - [Improvement] - [kdbscope] - [Human-readable numbers throughout: compact counts with exact values on hover in the UI, thousands separators and binary byte units in the CLI, relative timestamps]
 - [IN-PROGRESS] - [2026-07-10 22:08 UTC] - [Feature] - [kdbscope] - [Docs staleness (archived/aging) + full docs coverage + dashboard indexing-activity stats]
+- [COMPLETED] - [2026-07-10 22:25 UTC] - [Feature] - [kdbscope] - [Docs staleness: archived (path) stored + aging (query-time), downrank 0.6 + labels in search/ask/UI/CLI/MCP, docs cap 400→2000 depth 6 with loud truncation, version-forced backfill without re-embed]
+- [COMPLETED] - [2026-07-10 22:25 UTC] - [Feature] - [kdbscope] - [Dashboard: 30-day indexing activity chart, per-source files/volume/last-indexed, recent runs, archived-docs count; kdbs status matches]
