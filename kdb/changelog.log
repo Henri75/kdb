@@ -17,3 +17,8 @@
 - [IN-PROGRESS] - [2026-07-10 22:08 UTC] - [Feature] - [kdbscope] - [Docs staleness (archived/aging) + full docs coverage + dashboard indexing-activity stats]
 - [COMPLETED] - [2026-07-10 22:25 UTC] - [Feature] - [kdbscope] - [Docs staleness: archived (path) stored + aging (query-time), downrank 0.6 + labels in search/ask/UI/CLI/MCP, docs cap 400→2000 depth 6 with loud truncation, version-forced backfill without re-embed]
 - [COMPLETED] - [2026-07-10 22:25 UTC] - [Feature] - [kdbscope] - [Dashboard: 30-day indexing activity chart, per-source files/volume/last-indexed, recent runs, archived-docs count; kdbs status matches]
+- [IN-PROGRESS] - [2026-07-11 01:25 UTC] - [Bugfix] - [kdbscope] - [Ask: scoped project filter hid answers living in sibling projects; add soft-scope auto-fallback to all-projects]
+- [COMPLETED] - [2026-07-11 01:35 UTC] - [Bugfix] - [kdbscope] - [Ask soft-scope fallback: empty project-scoped ask widens to all projects + scopeFallback marker in API/MCP/UI; verified live on the G2P-drain repro]
+- [IN-PROGRESS] - [2026-07-11 01:55 UTC] - [Feature] - [kdbscope] - [Ask quality: source-type diversity + doc boost so debug-session chatter stops crowding out authoritative docs; multi-select source filter; UI markdown render + copy buttons]
+- [COMPLETED] - [2026-07-11 04:30 UTC] - [Feature] - [kdbscope] - [Ask context reranking (doc boost + session cap) fixes thin answers; multi-select source filter; UI markdown render, copy buttons, visible new-conversation button]
+- [COMPLETED] - [2026-07-11 04:45 UTC] - [Docs] - [kdbscope] - [api/mcp/architecture/cli docs: soft scope + scopeFallback, context reranking, multi-value source filter; +tests for rerank, multi-source parse, markdown XSS, MultiSelect/CopyButton, scopeFallback capture]

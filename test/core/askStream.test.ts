@@ -15,7 +15,16 @@ const hit = {
 };
 
 function makeService(hits: unknown[], streamBody?: string) {
-  const search = { search: async () => ({ hits, mode: 'hybrid', degraded: false, tookMs: 1 }) };
+  const search = {
+    search: async (_q: string, filters: { project?: string } = {}) => ({
+      // A project scope this fixture data does not belong to matches nothing —
+      // lets tests drive the empty-scope fallback path.
+      hits: filters.project && filters.project !== 'deepcast' ? [] : hits,
+      mode: 'hybrid',
+      degraded: false,
+      tookMs: 1,
+    }),
+  };
   const catalog = {
     getEntries: async (ids: number[]) => new Map(ids.map((i) => [i, { body: 'full body' }])),
   };
@@ -153,5 +162,43 @@ describe('AskService.askStream', () => {
     const firstDelta = events.findIndex((e) => e.type === 'delta');
     const sourcesAt = events.findIndex((e) => e.type === 'sources');
     expect(sourcesAt).toBeLessThan(firstDelta);
+  });
+
+  /**
+   * The core regression: a feature indexed under one project (the drain feature
+   * lives in google-gemini-pool) was invisible when asked about scoped to the
+   * "wrong" sibling project. A hard scope must fall back to all projects rather
+   * than confidently answer "no such thing exists".
+   */
+  it('widens to all projects when the scoped question matches nothing there', async () => {
+    // hit belongs to `deepcast`; scope to a project the fixture never matches.
+    const svc = makeService([hit], frame('It lives in deepcast [1]'));
+    const events = await collect(svc.askStream('drain feature?', { project: 'google-gemini-pool' }));
+
+    const sources = events.find((e) => e.type === 'sources') as any;
+    expect(sources.sources).toHaveLength(1);
+    expect(sources.scopeFallback).toEqual({
+      requested: 'google-gemini-pool',
+      usedAllProjects: true,
+    });
+    const text = events.filter((e) => e.type === 'delta').map((e: any) => e.text).join('');
+    expect(text).toContain('deepcast');
+  });
+
+  it('does NOT fall back when the scoped question has in-scope hits', async () => {
+    const svc = makeService([hit], frame('answer [1]'));
+    const events = await collect(svc.askStream('q', { project: 'deepcast' }));
+
+    const sources = events.find((e) => e.type === 'sources') as any;
+    expect(sources.sources).toHaveLength(1);
+    expect(sources.scopeFallback).toBeUndefined();
+  });
+
+  it('reports no match when nothing matches even after widening', async () => {
+    const svc = makeService([]); // empty everywhere
+    const events = await collect(svc.askStream('nothing', { project: 'whatever' }));
+    const sources = events.find((e) => e.type === 'sources') as any;
+    expect(sources.scopeFallback).toBeUndefined();
+    expect((events[1] as any).text).toMatch(/No indexed content matched/);
   });
 });

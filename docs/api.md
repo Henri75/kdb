@@ -3,6 +3,7 @@
 # REST API
 
 ## Revision History
+- 2026-07-11 04:35 UTC — `source` accepts a comma-separated subset (`doc,kdb_component`); Ask retrieval reranks for source-type diversity; Ask returns `scopeFallback` (and the SSE `sources` event carries it) when a project scope was empty and widened to all projects.
 - 2026-07-10 22:24 UTC — `docStatus` filter on search/ask; hits carry `docStatus`/`ageMonths`; dashboard adds `sourceDetail`, `activity`, `runs`, `archivedDocs`.
 - 2026-07-10 00:00 UTC — /api/dashboard: storage, service health, vector stats.
 - 2026-07-09 22:25 UTC — Conversation history on both Ask endpoints; `kind` filter.
@@ -16,9 +17,9 @@ Base: `http://127.0.0.1:8710`. JSON everywhere. No auth (localhost-only tool).
 | GET | `/api/health` | — | `{ok}` |
 | GET | `/api/stats` | — | counts, per-source breakdown, embedder, collection, lastRunAt, `queue`, `pending`, `backfill`, `recentErrors` |
 | GET | `/api/dashboard` | — | everything in `/api/stats` plus `sessions`, `storage`, `health`, `vectors`, `sourceDetail` (per-source entries/files/volume/last-indexed), `activity` (30-day per-day per-source counts), `runs`, `archivedDocs` |
-| GET | `/api/search` | `q` (required), `project`, `source`, `component`, `kind`, `since`, `until`, `docStatus` (`active` excludes archived docs, `archived` targets them), `limit` | `{hits[], mode, degraded, tookMs}`; each hit carries `hostPath` + `editorUrl`, and doc hits may carry `docStatus` (`archived` = downranked, `aging` = label only) + `ageMonths` |
-| POST | `/api/ask` | `{question, project?, source?, component?, kind?, docStatus?, k?, history?}` | `{answer, sources[], model, degraded}` |
-| POST | `/api/ask/stream` | same as `/api/ask` | SSE: `sources` → `delta`* → `done` |
+| GET | `/api/search` | `q` (required), `project`, `source` (one type or a comma-separated subset, e.g. `doc,kdb_component`; empty = all), `component`, `kind`, `since`, `until`, `docStatus` (`active` excludes archived docs, `archived` targets them), `limit` | `{hits[], mode, degraded, tookMs}`; each hit carries `hostPath` + `editorUrl`, and doc hits may carry `docStatus` (`archived` = downranked, `aging` = label only) + `ageMonths` |
+| POST | `/api/ask` | `{question, project?, source?` (string or string[]), `component?, kind?, docStatus?, k?, history?}` | `{answer, sources[], model, degraded, scopeFallback?}` — `scopeFallback: {requested, usedAllProjects}` when a project scope matched nothing and the search widened to all projects |
+| POST | `/api/ask/stream` | same as `/api/ask` | SSE: `sources` → `delta`* → `done`; the `sources` event carries `scopeFallback?` |
 | GET | `/api/projects` | — | projects with entry counts |
 | GET | `/api/projects/:slug/timeline` | `limit`, `before` (ISO cursor), `sources` (csv) | `{items[]}` newest first |
 | GET | `/api/projects/:slug/components` | — | `{components[]}` |
@@ -80,6 +81,18 @@ with history present that is fine (the conversation holds the answer), while a
 `GET /api/search?q=qdrant&kind=insight` returns only `★ Insight` blocks. See
 [architecture](architecture.md#message-kinds).
 
+`source` restricts to one or more source types. Pass a single value
+(`source=doc`) or a comma-separated subset (`source=doc,kdb_component`); an
+empty value searches everything. The Ask endpoints accept the same value as a
+string or a JSON `string[]`.
+
+**Ask vs. search ranking.** `/api/search` returns hits in raw relevance order.
+The Ask endpoints then rerank the retrieved pool for context quality: authoritative
+sources (docs, kdb component/changelog logs) are boosted and `claude_session`
+blocks are capped at half the context window, so descriptive documentation is not
+crowded out by transcripts that merely echo the question. See
+[architecture](architecture.md#ask-mode).
+
 ## Streaming Ask
 
 `POST /api/ask/stream` returns `text/event-stream`. Each frame is
@@ -87,7 +100,7 @@ with history present that is fine (the conversation holds the answer), while a
 
 | Event | Payload | Meaning |
 |---|---|---|
-| `sources` | `{sources: [...]}` | retrieved context; emitted before any prose |
+| `sources` | `{sources: [...], scopeFallback?}` | retrieved context; emitted before any prose. `scopeFallback: {requested, usedAllProjects}` appears when a project scope was empty and the search widened to all projects |
 | `delta` | `{text: "…"}` | append to the answer |
 | `done` | `{model, degraded}` | terminal; `degraded` if the LLM failed |
 

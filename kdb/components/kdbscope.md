@@ -271,3 +271,68 @@
 
 **Status:**
 - Completed
+
+---
+### [2026-07-11] - Ask soft-scope fallback (project scope no longer hides sibling-project answers)
+
+**Objective:**
+- Stop a project-scoped kdb_ask from returning a confident "not found" when the answer lives in another project.
+
+**Summary of Work:**
+- Root cause: `filters.project` is a hard filter in search. A question about G2P's NEXUS "drain" feature scoped to `deepcast` matched nothing, because the feature is indexed under slug `google-gemini-pool`. Retrieval could not fall back, so the LLM correctly reported the feature absent. NOT an indexing lag (content was searchable within one 5-min scan cycle).
+- Fix in AskService: new `retrieve()` helper keeps the hard scope by default, but on an *empty* scoped result re-runs the search across all projects; if that surfaces hits it returns them plus a `scopeFallback` marker. A `scopeNote` is appended to the prompt so the answer opens by naming the empty scope and where the answer actually came from.
+- Surfaced `scopeFallback` through AskResult, the `sources` AskEvent (SSE), the MCP kdb_ask passthrough (+ description now steers callers away from over-scoping), and a UI banner in AskConversation.
+- Left `search()` untouched: direct search/MCP-search callers still get a hard filter.
+
+**Key Decisions & Rationale:**
+- Fallback lives in Ask, not search: search is a low-level primitive many callers want strictly scoped; "found it elsewhere" is an Ask-layer concern.
+- Only flag fallback when widening actually finds something — an all-projects miss is a real dead end, not a scope problem.
+
+**Code/Files Modified:**
+- packages/core/src/ask.ts
+- packages/core/src/types.ts
+- packages/mcp/src/tools.ts
+- packages/ui/src/api.ts
+- packages/ui/src/types.ts
+- packages/ui/src/views/AskConversation.tsx
+- test/core/askStream.test.ts
+
+**Outcomes & Lessons Learned:**
+- **What Worked:** Live repro against rebuilt api — scoped-to-deepcast ask now returns scopeFallback + 8 sources + an answer that explains the wrong scope. Full suite 313/313.
+- **What Failed:** N/A — root cause confirmed by reproduction before any code change (unscoped ask always worked; only the scoped one failed).
+- **Lesson:** "KDB can't find X" is far more often a query-scoping problem than an indexing problem. Verify with an unscoped search before suspecting the pipeline.
+
+**Status:**
+- Completed
+
+---
+### [2026-07-11] - Ask answer quality (context reranking) + multi-source filter + UI polish
+
+**Objective:**
+- Fix thin Ask answers that described a feature's plumbing but never said what it does; render answers as HTML; let users pick a subset of source types; add copy buttons; make "new conversation" visible.
+
+**Summary of Work:**
+- Root cause of the weak answer (confirmed by inspecting retrieved blocks live): self-pollution. A tool that indexes its own operators' conversations ranks the debugging transcripts about "the drain feature" ABOVE the doc that explains draining, because transcripts echo the query verbatim while the doc uses different words. 5 of 8 context blocks were our own meta-session.
+- Fix: `rerankForContext(pool, k)` in AskService — over-fetch (k*3, capped 24..60), apply per-source-type weights (doc 1.35, kdb_component 1.3, … claude_session 0.8), and hard-cap claude_session at 50% of the window (held-over sessions backfill if nothing better exists). System prompt also now tells the model to lead with a direct definition and prefer descriptive sources. Live result: doc blocks now fill slots 5-8 and the answer opens "used to stop routing new traffic to a specific egress node…".
+- Multi-value source filter: `SearchFilters.sourceTypes?: SourceType[]` applied in qdrant (`match.any`) and FTS (`= ANY`); API `parseSources()` accepts comma string or JSON array; singular `sourceType` kept for back-compat.
+- UI: `Markdown.tsx` (marked@18 + DOMPurify@3.4 → sanitized HTML, then `[n]`→superscript on the sanitized string) with scoped `.kdb-md` CSS; `MultiSelect` checkbox popover replacing the all-or-one source dropdown; `CopyButton` for each reply and each cited source (rows de-nested from <button>); visible "＋ New conversation" pill replacing the faint underline link.
+
+**Key Decisions & Rationale:**
+- Rerank in Ask, not search: search callers want raw ranked hits; context curation is an Ask concern.
+- Weight + hard cap together: weighting alone lets near-duplicate sessions still crowd the window on raw score.
+- marked+DOMPurify (not raw HTML from the LLM): the answer is model output over untrusted indexed content, so parse→sanitize→inject is mandatory (XSS).
+
+**Code/Files Modified:**
+- packages/core/src/ask.ts, types.ts, qdrant.ts, catalog.ts
+- packages/api/src/app.ts
+- packages/ui/src/components/{Markdown.tsx,ui.tsx}, views/{SearchView.tsx,AskConversation.tsx}, api.ts, types.ts, styles.css
+- packages/ui/package.json (marked, dompurify)
+- test/core/{rerankForContext.test.ts,qdrantFilter.test.ts}
+
+**Outcomes & Lessons Learned:**
+- **What Worked:** rerank verified live — authoritative docs now dominate context and the answer defines the feature first. Suite 320/320.
+- **What Failed:** N/A — the weak-answer cause was pinned by reading the actual retrieved source list, not guessed.
+- **Lesson:** For a self-indexing knowledge tool, retrieval must defend against its own exhaust: debugging chatter about X out-matches docs that explain X. Source-type diversity is not optional.
+
+**Status:**
+- Completed

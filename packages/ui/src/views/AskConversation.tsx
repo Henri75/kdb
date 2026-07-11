@@ -1,7 +1,8 @@
 import { useCallback, useRef, useState } from 'react';
 import { api } from '../api';
-import type { AskSource } from '../types';
-import { Badge, Stamp } from '../components/ui';
+import type { AskSource, SourceType } from '../types';
+import { Badge, CopyButton, Stamp } from '../components/ui';
+import { Markdown } from '../components/Markdown';
 
 /**
  * Multi-turn Ask. Each turn is addressable, so a reply can be retried and any
@@ -19,34 +20,31 @@ export interface Turn {
   streaming?: boolean;
   error?: string;
   degraded?: boolean;
+  /** Set when the asked-for project was empty and the search widened to all. */
+  scopeFallback?: { requested: string; usedAllProjects: true };
 }
 
 let seq = 0;
 const newId = () => `t${++seq}`;
 
-/** Render [n] citations as amber superscripts. */
-function Cited({ text }: { text: string }) {
-  const parts = text.split(/(\[\d+\])/g);
-  return (
-    <div className="whitespace-pre-wrap leading-relaxed">
-      {parts.map((p, i) => {
-        const m = p.match(/^\[(\d+)\]$/);
-        return m ? (
-          <sup key={i} className="font-mono text-[11px] px-0.5" style={{ color: 'var(--color-kdb)' }}>
-            [{m[1]}]
-          </sup>
-        ) : (
-          <span key={i}>{p}</span>
-        );
-      })}
-    </div>
-  );
+/** A one-line, paste-ready reference for a cited source. */
+function sourceRef(s: AskSource): string {
+  const date = s.occurredAt ? ` (${s.occurredAt.slice(0, 10)})` : '';
+  return `[${s.n}] ${s.title} — ${s.projectSlug}/${s.sourceType}${date}\n${s.sourcePath}`;
 }
 
-export function useAskConversation(project: string, onOpenEntry: (id: number) => void) {
+export function useAskConversation(
+  project: string,
+  onOpenEntry: (id: number) => void,
+  sources: SourceType[] = [],
+) {
   const [turns, setTurns] = useState<Turn[]>([]);
   const abortRef = useRef<AbortController | null>(null);
   const runRef = useRef(0);
+  // Read at send time so the callbacks don't churn on every filter change and
+  // don't capture a stale source list.
+  const sourcesRef = useRef(sources);
+  sourcesRef.current = sources;
   // Mirrors `turns` so send/retry can read the current conversation without
   // doing side effects inside a state updater (which StrictMode runs twice).
   const turnsRef = useRef<Turn[]>([]);
@@ -80,13 +78,15 @@ export function useAskConversation(project: string, onOpenEntry: (id: number) =>
           {
             question,
             project: project || undefined,
+            source: sourcesRef.current.length ? sourcesRef.current : undefined,
             history: history.map((t) => ({ role: t.role, content: t.content })),
           },
           controller.signal,
         );
         for await (const ev of stream) {
           if (runRef.current !== myRun) break;
-          if (ev.type === 'sources') patch(answerId, { sources: ev.sources });
+          if (ev.type === 'sources')
+            patch(answerId, { sources: ev.sources, scopeFallback: ev.scopeFallback });
           else if (ev.type === 'delta') {
             commit((prev) =>
               prev.map((t) => (t.id === answerId ? { ...t, content: t.content + ev.text } : t)),
@@ -200,7 +200,7 @@ export function Conversation({
                     {t.error}
                   </p>
                 ) : t.content ? (
-                  <Cited text={t.content} />
+                  <Markdown text={t.content} />
                 ) : (
                   <span className="font-mono text-sm text-faint">
                     {t.streaming ? 'reading sources…' : ''}
@@ -222,24 +222,42 @@ export function Conversation({
               <TurnActions
                 onRetry={t.streaming ? undefined : () => onRetry(t.id)}
                 onDelete={() => onDelete(t.id)}
+                copyText={t.content && !t.streaming ? t.content : undefined}
               />
             </div>
+
+            {t.scopeFallback && (
+              <p className="font-mono text-xs mt-2" style={{ color: 'var(--color-report)' }}>
+                ⓘ Nothing matched in <b>{t.scopeFallback.requested}</b> — searched all projects instead.
+              </p>
+            )}
 
             {t.sources && t.sources.length > 0 && (
               <div className="mt-2 space-y-1.5">
                 {t.sources.map((s) => (
-                  <button
+                  // A row is not itself a <button> (it holds a nested copy
+                  // button — invalid to nest). The title area is the click target.
+                  <div
                     key={s.n}
-                    onClick={() => onOpenEntry(s.entryId)}
-                    className="w-full flex items-baseline gap-2 text-sm text-left hover:bg-panel rounded px-1 py-0.5"
+                    className="group/src flex items-baseline gap-2 text-sm rounded px-1 py-0.5 hover:bg-panel"
                   >
-                    <span className="font-mono text-[11px]" style={{ color: 'var(--color-kdb)' }}>
-                      [{s.n}]
-                    </span>
-                    <Badge source={s.sourceType} />
-                    <span className="text-muted truncate">{s.title}</span>
-                    <Stamp iso={s.occurredAt} />
-                  </button>
+                    <button
+                      onClick={() => onOpenEntry(s.entryId)}
+                      className="flex-1 min-w-0 flex items-baseline gap-2 text-left"
+                    >
+                      <span className="font-mono text-[11px]" style={{ color: 'var(--color-kdb)' }}>
+                        [{s.n}]
+                      </span>
+                      <Badge source={s.sourceType} />
+                      <span className="text-muted truncate">{s.title}</span>
+                      <Stamp iso={s.occurredAt} />
+                    </button>
+                    <CopyButton
+                      text={sourceRef(s)}
+                      title="Copy source reference"
+                      className="opacity-0 group-hover/src:opacity-100 focus:opacity-100 transition-opacity"
+                    />
+                  </div>
                 ))}
               </div>
             )}
@@ -250,9 +268,18 @@ export function Conversation({
   );
 }
 
-function TurnActions({ onRetry, onDelete }: { onRetry?: () => void; onDelete: () => void }) {
+function TurnActions({
+  onRetry,
+  onDelete,
+  copyText,
+}: {
+  onRetry?: () => void;
+  onDelete: () => void;
+  copyText?: string;
+}) {
   return (
     <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+      {copyText && <CopyButton text={copyText} title="Copy reply" />}
       {onRetry && (
         <button
           onClick={onRetry}

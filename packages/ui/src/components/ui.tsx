@@ -1,7 +1,139 @@
-import type { ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { SOURCE_META, type SourceType } from '../types';
 
 /** Small shared pieces: source badge, spine row, date stamp, empty state. */
+
+/**
+ * Checkbox popover for picking a subset of options: all, one, or several —
+ * the single-select dropdown could only do all-or-one. The trigger summarizes
+ * the selection ("all sources" / "doc" / "3 sources") so the current filter is
+ * always legible without opening it.
+ */
+export function MultiSelect<T extends string>({
+  options,
+  selected,
+  onChange,
+  allLabel,
+  label,
+  render,
+}: {
+  options: readonly T[];
+  selected: T[];
+  onChange: (next: T[]) => void;
+  /** Shown on the trigger and as the "select all/none" row when empty = all. */
+  allLabel: string;
+  /** aria-label for the trigger. */
+  label: string;
+  /** Optional per-option label; defaults to the raw value. */
+  render?: (v: T) => string;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Click-away closes it; a popover left open on scroll/navigation is noise.
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [open]);
+
+  const summary =
+    selected.length === 0
+      ? allLabel
+      : selected.length === 1
+        ? (render?.(selected[0]) ?? selected[0])
+        : `${selected.length} selected`;
+
+  const toggle = (v: T) =>
+    onChange(selected.includes(v) ? selected.filter((x) => x !== v) : [...selected, v]);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-label={label}
+        aria-expanded={open}
+        className="bg-panel border border-line rounded-md px-2 py-3 text-sm text-muted font-mono hover:border-faint whitespace-nowrap"
+      >
+        {summary} <span className="text-faint">▾</span>
+      </button>
+      {open && (
+        <div className="absolute z-20 mt-1 min-w-[12rem] max-h-72 overflow-auto bg-panel border border-line rounded-md p-1 shadow-lg">
+          <button
+            type="button"
+            onClick={() => onChange([])}
+            className={`w-full text-left px-2 py-1.5 rounded text-sm font-mono hover:bg-panel-2 ${
+              selected.length === 0 ? 'text-ink' : 'text-muted'
+            }`}
+          >
+            {selected.length === 0 ? '● ' : '○ '}
+            {allLabel}
+          </button>
+          <div className="my-1 border-t border-line" />
+          {options.map((v) => {
+            const on = selected.includes(v);
+            return (
+              <button
+                key={v}
+                type="button"
+                onClick={() => toggle(v)}
+                className={`w-full text-left px-2 py-1.5 rounded text-sm font-mono hover:bg-panel-2 ${
+                  on ? 'text-ink' : 'text-muted'
+                }`}
+              >
+                {on ? '☑ ' : '☐ '}
+                {render?.(v) ?? v}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Copy `text` to the clipboard, flashing a check for confirmation. Kept tiny
+ * and unstyled-by-default (className passthrough) so it drops into a reply
+ * header or a source row alike.
+ */
+export function CopyButton({
+  text,
+  title = 'Copy',
+  className = '',
+}: {
+  text: string;
+  title?: string;
+  className?: string;
+}) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      onClick={(e) => {
+        // Source rows are themselves buttons; don't also open the entry.
+        e.stopPropagation();
+        // clipboard API needs a secure context; the app runs on localhost which
+        // qualifies. Fail silently rather than throwing into the render tree.
+        void navigator.clipboard?.writeText(text).then(
+          () => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1200);
+          },
+          () => {},
+        );
+      }}
+      title={title}
+      aria-label={title}
+      className={`text-muted hover:text-ink text-[13px] leading-none px-1 ${className}`}
+    >
+      {copied ? <span style={{ color: 'var(--color-git)' }}>✓</span> : '⧉'}
+    </button>
+  );
+}
 
 export function Badge({ source }: { source: SourceType }) {
   const m = SOURCE_META[source] ?? { label: source, color: 'var(--color-muted)' };

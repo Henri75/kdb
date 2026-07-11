@@ -92,7 +92,10 @@ export const ALL_ENTRY_KINDS: EntryKind[] = [
 
 export interface SearchFilters {
   project?: string;
+  /** Single source type. Kept for back-compat; prefer sourceTypes for a subset. */
   sourceType?: SourceType;
+  /** Restrict to any of these source types. Empty/undefined means all. */
+  sourceTypes?: SourceType[];
   component?: string;
   /** Only meaningful for claude_session entries. */
   kind?: EntryKind;
@@ -141,11 +144,27 @@ export interface AskSource {
   occurredAt?: string;
 }
 
+/**
+ * Emitted when a question was scoped to one project but nothing matched there,
+ * so retrieval was retried across all projects. Lets the caller tell the user
+ * "nothing in <requested>; here is what I found elsewhere" instead of a
+ * misleading "no such thing exists" — the failure mode where a feature built in
+ * a sibling project (e.g. asking about G2P scoped to `deepcast`) looked absent.
+ */
+export interface ScopeFallback {
+  /** The project the caller asked to scope to. */
+  requested: string;
+  /** True once the search was widened to every project. */
+  usedAllProjects: true;
+}
+
 export interface AskResult {
   answer: string;
   sources: AskSource[];
   model: string;
   degraded: boolean;
+  /** Present only when the project scope was widened to find any answer. */
+  scopeFallback?: ScopeFallback;
 }
 
 export interface TimelineItem {

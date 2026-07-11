@@ -37,6 +37,40 @@ describe('useAskConversation', () => {
     expect(result.current.turns[1]!.content).toBe('Hi');
   });
 
+  it('passes the selected source subset to the ask endpoint', async () => {
+    const spy = stubStream(sse({ type: 'done', model: 'm', degraded: false }));
+    const { result } = renderHook(() =>
+      useAskConversation('deepcast', () => {}, ['doc', 'kdb_component']),
+    );
+    act(() => result.current.send('q'));
+    await waitFor(() => expect(result.current.turns[1]!.streaming).toBe(false));
+    expect(JSON.parse(spy.mock.calls[0][1].body).source).toEqual(['doc', 'kdb_component']);
+  });
+
+  it('omits source when nothing is selected (all sources)', async () => {
+    const spy = stubStream(sse({ type: 'done', model: 'm', degraded: false }));
+    const { result } = renderHook(() => useAskConversation('', () => {}, []));
+    act(() => result.current.send('q'));
+    await waitFor(() => expect(result.current.turns[1]!.streaming).toBe(false));
+    expect(JSON.parse(spy.mock.calls[0][1].body).source).toBeUndefined();
+  });
+
+  it('captures a scopeFallback marker from the sources event', async () => {
+    stubStream(
+      sse(
+        { type: 'sources', sources: [], scopeFallback: { requested: 'deepcast', usedAllProjects: true } },
+        { type: 'done', model: 'm', degraded: false },
+      ),
+    );
+    const { result } = renderHook(() => useAskConversation('deepcast', () => {}));
+    act(() => result.current.send('q'));
+    await waitFor(() => expect(result.current.turns[1]!.streaming).toBe(false));
+    expect(result.current.turns[1]!.scopeFallback).toEqual({
+      requested: 'deepcast',
+      usedAllProjects: true,
+    });
+  });
+
   it('sends the prior conversation with a follow-up', async () => {
     const spy = stubStream(sse({ type: 'delta', text: 'a' }, { type: 'done', model: 'm', degraded: false }));
     const { result } = renderHook(() => useAskConversation('', () => {}));

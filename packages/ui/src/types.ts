@@ -44,11 +44,18 @@ export interface AskSource {
   occurredAt?: string;
 }
 
+export interface ScopeFallback {
+  requested: string;
+  usedAllProjects: true;
+}
+
 export interface AskResult {
   answer: string;
   sources: AskSource[];
   model: string;
   degraded: boolean;
+  /** Set when a project scope matched nothing and the search widened to all. */
+  scopeFallback?: ScopeFallback;
 }
 
 export interface ProjectRow {

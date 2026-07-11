@@ -24,3 +24,4 @@
 - [2026-07-09] [kdbscope] Timeline filter only searches loaded pages; consider a server-side timeline search.
 - [2026-07-10] [kdbscope] Qdrant storage tree is walked twice per dashboard refresh (once for the total, once per collection); sum the per-collection walk instead.
 - [2026-07-10] [kdbscope] Offer a one-click reclaim for stale vector collections from the dashboard, rather than a documented curl.
+- [2026-07-11] [kdbscope] Phantom duplicate projects (empty rootPath, e.g. users-nasta-documents-* / volumes-cloudbox-*) split G2P/DeepCast history across ghost slugs — Claude session dirs whose host cwd differs from the indexed codeRoot get a fallback slug. Add host-path alias/normalization so those dirs map to the canonical project, and merge/re-group existing ghost entries (PROJECT_GROUPING bump).

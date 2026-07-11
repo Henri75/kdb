@@ -22,6 +22,24 @@ describe('buildQdrantFilter', () => {
     });
   });
 
+  it('matches any of several source types with an OR clause', () => {
+    expect(buildQdrantFilter({ sourceTypes: ['doc', 'kdb_component'] })).toEqual({
+      must: [{ key: 'source_type', match: { any: ['doc', 'kdb_component'] } }],
+    });
+  });
+
+  it('collapses a single-element sourceTypes to an equality match', () => {
+    expect(buildQdrantFilter({ sourceTypes: ['doc'] })).toEqual({
+      must: [{ key: 'source_type', match: { value: 'doc' } }],
+    });
+  });
+
+  it('lets sourceTypes win over the legacy singular sourceType', () => {
+    expect(buildQdrantFilter({ sourceType: 'git_commit', sourceTypes: ['doc', 'kdb_report'] })).toEqual({
+      must: [{ key: 'source_type', match: { any: ['doc', 'kdb_report'] } }],
+    });
+  });
+
   it('collapses since/until into one range clause', () => {
     expect(buildQdrantFilter({ since: '2026-01-01', until: '2026-02-01' })).toEqual({
       must: [{ key: 'occurred_at', range: { gte: '2026-01-01', lte: '2026-02-01' } }],

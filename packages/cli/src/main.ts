@@ -67,7 +67,7 @@ program
   .command('search')
   .argument('<query...>')
   .option('-p, --project <slug>')
-  .option('-s, --source <type>')
+  .option('-s, --source <types>', 'one source type or a comma-separated subset (doc,kdb_component)')
   .option('-c, --component <name>')
   .option('-k, --kind <kind>', 'insight | plan | summary | action | prompt | response')
   .option('-n, --limit <n>', 'max results', '10')

@@ -48,6 +48,25 @@ export function buildApp(deps: ApiDeps): Hono {
   app.use('/api/*', cors());
 
   /**
+   * Parse the `source` param, which may be a single type or a comma-separated
+   * subset ("doc,kdb_component"). A lone value stays in `sourceType` for
+   * back-compat; a subset becomes `sourceTypes`. Callers spread the result into
+   * their filter object.
+   */
+  const parseSources = (
+    raw?: string | string[],
+  ): { sourceType?: SourceType; sourceTypes?: SourceType[] } => {
+    // Accept both the GET query string ("doc,kdb_component") and a JSON body
+    // array (["doc","kdb_component"]) so search and ask share one parser.
+    const list = (Array.isArray(raw) ? raw : (raw ?? '').split(','))
+      .map((s) => String(s).trim())
+      .filter(Boolean) as SourceType[];
+    if (list.length === 0) return {};
+    if (list.length === 1) return { sourceType: list[0] };
+    return { sourceTypes: list };
+  };
+
+  /**
    * Attach the host path and an editor link to anything carrying a source.
    * A row without a source path is returned untouched rather than failing the
    * whole request.
@@ -126,7 +145,7 @@ export function buildApp(deps: ApiDeps): Hono {
       q,
       {
         project: c.req.query('project') || undefined,
-        sourceType: (c.req.query('source') as SourceType) || undefined,
+        ...parseSources(c.req.query('source')),
         component: c.req.query('component') || undefined,
         kind: (c.req.query('kind') as EntryKind) || undefined,
         since: c.req.query('since') || undefined,
@@ -158,7 +177,7 @@ export function buildApp(deps: ApiDeps): Hono {
     if (!question) return c.json({ error: 'question is required' }, 400);
     const result = await deps.ask.ask(
       question,
-      { project: body.project, sourceType: body.source, component: body.component, kind: body.kind, docStatus: body.docStatus },
+      { project: body.project, ...parseSources(body.source), component: body.component, kind: body.kind, docStatus: body.docStatus },
       Math.min(Number(body.k ?? 12), 30),
       sanitizeHistory(body.history),
     );
@@ -178,7 +197,7 @@ export function buildApp(deps: ApiDeps): Hono {
 
     const events = deps.ask.askStream(
       question,
-      { project: body.project, sourceType: body.source, component: body.component, kind: body.kind, docStatus: body.docStatus },
+      { project: body.project, ...parseSources(body.source), component: body.component, kind: body.kind, docStatus: body.docStatus },
       Math.min(Number(body.k ?? 12), 30),
       sanitizeHistory(body.history),
     );

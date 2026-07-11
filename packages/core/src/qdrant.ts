@@ -46,7 +46,15 @@ export function buildQdrantFilter(
   const must: object[] = [];
   const mustNot: object[] = [];
   if (filters.project) must.push({ key: 'project', match: { value: filters.project } });
-  if (filters.sourceType) must.push({ key: 'source_type', match: { value: filters.sourceType } });
+  // A subset (sourceTypes) wins over the single sourceType; the singular stays
+  // for back-compat. Qdrant's `any` is the multi-value OR match.
+  const types = filters.sourceTypes?.length
+    ? filters.sourceTypes
+    : filters.sourceType
+      ? [filters.sourceType]
+      : [];
+  if (types.length === 1) must.push({ key: 'source_type', match: { value: types[0] } });
+  else if (types.length > 1) must.push({ key: 'source_type', match: { any: types } });
   if (filters.component) must.push({ key: 'component', match: { value: filters.component } });
   if (filters.kind) must.push({ key: 'kind', match: { value: filters.kind } });
   // 'active' is expressed as NOT archived: most points carry no doc_status at

@@ -3,6 +3,7 @@
 # Architecture
 
 ## Revision History
+- 2026-07-11 04:35 UTC — Ask mode: soft project scope with all-projects fallback (`scopeFallback`); context reranking (doc boost + `claude_session` cap) so self-indexed chatter stops crowding out docs; multi-value `source` filter.
 - 2026-07-10 22:24 UTC — Doc staleness: archived/aging model, query-time ranking, version-forced backfill.
 - 2026-07-09 22:25 UTC — Message kinds; distiller keeps all prose + records actions; EXTRACTION_SCHEME.
 - 2026-07-09 16:00 UTC — Host vs container paths; multi-root discovery; PROJECT_GROUPING.
@@ -91,8 +92,28 @@ query ──► sparse encode (local, no network)
 degradation: hybrid → sparse-only (embedder down) → Postgres FTS (qdrant down)
 ```
 
-Ask mode: top-k retrieval → numbered context blocks → OpenAI-compatible
+## Ask mode
+
+Retrieval → rerank → numbered context blocks → OpenAI-compatible
 `chat/completions` (G2P preset or any endpoint) → answer with `[n]` citations.
+`AskService` layers two behaviors over raw search that keep answers grounded:
+
+- **Soft project scope.** A `project` filter is applied as a hard filter (a
+  scoped question usually wants scoped results), but when it matches *nothing*
+  the search widens to all projects and the result is flagged with
+  `scopeFallback: {requested, usedAllProjects}`. Without this, asking about a
+  feature under the "wrong" slug (G2P is indexed as `google-gemini-pool`, not
+  `deepcast`) returned a confident "not found" instead of the answer that lived
+  one project over. The prompt is told to open by naming the empty scope.
+- **Context reranking (`rerankForContext`).** Because KDBScope indexes its own
+  operators' conversations, a debugging transcript about "feature X" out-matches
+  the doc that *explains* X — the transcript echoes the question verbatim, the
+  doc uses different words. Left alone, Ask answers from chatter. So the pool is
+  over-fetched (k×3), each hit is multiplied by a per-source-type weight (docs
+  ×1.35, kdb component/report/changelog boosted, `claude_session` ×0.8), and
+  `claude_session` blocks are hard-capped at 50% of the k-block window (held-over
+  sessions backfill only if nothing better exists). `/api/search` is not
+  reranked — it returns raw relevance.
 
 ## Doc staleness
 

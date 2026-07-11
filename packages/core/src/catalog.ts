@@ -477,9 +477,19 @@ export class Catalog {
       params.push(filters.project);
       where += ` AND p.slug = $${params.length}`;
     }
-    if (filters.sourceType) {
-      params.push(filters.sourceType);
+    // A subset (sourceTypes) wins over the single sourceType, which stays for
+    // back-compat. One value → equality; several → ANY(array).
+    const types = filters.sourceTypes?.length
+      ? filters.sourceTypes
+      : filters.sourceType
+        ? [filters.sourceType]
+        : [];
+    if (types.length === 1) {
+      params.push(types[0]);
       where += ` AND e.source_type = $${params.length}`;
+    } else if (types.length > 1) {
+      params.push(types);
+      where += ` AND e.source_type = ANY($${params.length})`;
     }
     if (filters.component) {
       params.push(filters.component);

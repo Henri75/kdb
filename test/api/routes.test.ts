@@ -180,6 +180,36 @@ describe('api routes', () => {
     );
   });
 
+  it('GET /api/search parses a comma-separated source subset into sourceTypes', async () => {
+    const search = { search: vi.fn(async () => ({ hits: [], mode: 'hybrid', degraded: false, tookMs: 1 })) };
+    const app = buildApp(makeDeps({ search: search as any }));
+    await app.request('/api/search?q=bug&source=doc,kdb_component');
+    expect(search.search).toHaveBeenCalledWith(
+      'bug',
+      expect.objectContaining({ sourceTypes: ['doc', 'kdb_component'] }),
+      expect.anything(),
+    );
+    // A subset never also sets the singular sourceType.
+    const filters = (search.search.mock.lastCall as unknown as [string, object])[1];
+    expect(filters).not.toHaveProperty('sourceType');
+  });
+
+  it('POST /api/ask accepts source as a JSON array', async () => {
+    const ask = { ask: vi.fn(async () => ({ answer: 'a', sources: [], model: 'm', degraded: false })) };
+    const app = buildApp(makeDeps({ ask: ask as any }));
+    await app.request('/api/ask', {
+      method: 'POST',
+      body: JSON.stringify({ question: 'q', source: ['doc', 'kdb_component'] }),
+      headers: { 'content-type': 'application/json' },
+    });
+    expect(ask.ask).toHaveBeenCalledWith(
+      'q',
+      expect.objectContaining({ sourceTypes: ['doc', 'kdb_component'] }),
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
   it('POST /api/ask requires question', async () => {
     const res = await buildApp(makeDeps()).request('/api/ask', {
       method: 'POST',

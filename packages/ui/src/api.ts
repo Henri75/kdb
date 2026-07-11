@@ -38,7 +38,7 @@ export function qs(params: Record<string, unknown>): string {
 
 /** Events emitted by POST /api/ask/stream (mirrors core's AskEvent). */
 export type AskEvent =
-  | { type: 'sources'; sources: AskResult['sources'] }
+  | { type: 'sources'; sources: AskResult['sources']; scopeFallback?: AskResult['scopeFallback'] }
   | { type: 'delta'; text: string }
   | { type: 'done'; model: string; degraded: boolean }
   | { type: 'error'; message: string };

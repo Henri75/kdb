@@ -62,10 +62,13 @@ export const TOOLS: ToolDef[] = [
   {
     name: 'kdb_ask',
     description:
-      'Ask a question about what happened across projects ("what were the bug fixes in the video import microservice?"). Retrieves relevant history and synthesizes a cited answer with an LLM.',
+      'Ask a question about what happened across projects ("what were the bug fixes in the video import microservice?"). Retrieves relevant history and synthesizes a cited answer with an LLM. Prefer leaving `project` unset: a feature may be indexed under a different slug than you expect (e.g. G2P lives under "google-gemini-pool", not "deepcast"), and a wrong scope is the main reason a real answer looks missing. When `project` is set but nothing matches there, the search widens to all projects and the response carries a `scopeFallback` marker naming the scope that was empty.',
     schema: {
       question: z.string(),
-      project: z.string().optional(),
+      project: z
+        .string()
+        .optional()
+        .describe('Optional project slug. Omit unless you are sure of the slug; a wrong scope hides answers that live in a sibling project.'),
       k: z.number().int().min(1).max(30).optional().describe('Context blocks to retrieve (default 12)'),
     },
     request: (a) => ({ path: '/api/ask', init: jsonPost(a) }),

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { FilterInput, Highlight, matches } from '../../packages/ui/src/components/ui';
+import { CopyButton, FilterInput, Highlight, MultiSelect, matches } from '../../packages/ui/src/components/ui';
 
 afterEach(cleanup);
 
@@ -57,5 +57,57 @@ describe('FilterInput', () => {
     render(<FilterInput value="x" onChange={onChange} placeholder="Filter…" />);
     fireEvent.click(screen.getByText('clear'));
     expect(onChange).toHaveBeenCalledWith('');
+  });
+});
+
+describe('MultiSelect', () => {
+  const OPTS = ['doc', 'git_commit', 'claude_session'] as const;
+
+  it('summarizes the selection on the trigger: all / one / count', () => {
+    const { rerender } = render(
+      <MultiSelect options={OPTS} selected={[]} onChange={() => {}} allLabel="all sources" label="Source" />,
+    );
+    expect(screen.getByLabelText('Source').textContent).toContain('all sources');
+
+    rerender(
+      <MultiSelect options={OPTS} selected={['doc']} onChange={() => {}} allLabel="all sources" label="Source" />,
+    );
+    expect(screen.getByLabelText('Source').textContent).toContain('doc');
+
+    rerender(
+      <MultiSelect options={OPTS} selected={['doc', 'git_commit']} onChange={() => {}} allLabel="all sources" label="Source" />,
+    );
+    expect(screen.getByLabelText('Source').textContent).toContain('2 selected');
+  });
+
+  it('toggles an option into the selection', () => {
+    const onChange = vi.fn();
+    render(<MultiSelect options={OPTS} selected={['doc']} onChange={onChange} allLabel="all sources" label="Source" />);
+    fireEvent.click(screen.getByLabelText('Source')); // open
+    // Rows render as "☐ git_commit"; match on substring.
+    fireEvent.click(screen.getByText((t) => t.includes('git_commit')));
+    expect(onChange).toHaveBeenCalledWith(['doc', 'git_commit']);
+  });
+
+  it('the all row resets to an empty selection', () => {
+    const onChange = vi.fn();
+    render(<MultiSelect options={OPTS} selected={['doc']} onChange={onChange} allLabel="all sources" label="Source" />);
+    fireEvent.click(screen.getByLabelText('Source'));
+    // The popover's "all sources" row is "● all sources" / "○ all sources";
+    // the bare "all sources" (the trigger) is separate.
+    const allRow = screen.getByText((t) => /[●○]\s*all sources/.test(t));
+    fireEvent.click(allRow);
+    expect(onChange).toHaveBeenCalledWith([]);
+  });
+});
+
+describe('CopyButton', () => {
+  it('writes the given text to the clipboard on click', () => {
+    const writeText = vi.fn(() => Promise.resolve());
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+    render(<CopyButton text="paste me" />);
+    fireEvent.click(screen.getByRole('button'));
+    expect(writeText).toHaveBeenCalledWith('paste me');
+    vi.unstubAllGlobals();
   });
 });

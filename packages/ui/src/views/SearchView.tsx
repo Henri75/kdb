@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import type { EntryKind, SearchResult, SourceType } from '../types';
-import { Badge, DegradedBanner, Empty, SpineRow, Spinner, Stamp } from '../components/ui';
+import { Badge, DegradedBanner, Empty, MultiSelect, SpineRow, Spinner, Stamp } from '../components/ui';
 import { EntryDrawer } from '../components/EntryDrawer';
 import { Conversation, useAskConversation } from './AskConversation';
 
 /** Search + Ask: one input, two modes. '/' focuses; Enter searches; ⌘Enter asks. */
 
-const SOURCES: (SourceType | '')[] = [
-  '', 'kdb_changelog', 'kdb_component', 'kdb_session', 'kdb_backlog',
+const SOURCES: SourceType[] = [
+  'kdb_changelog', 'kdb_component', 'kdb_session', 'kdb_backlog',
   'kdb_report', 'claude_session', 'git_commit', 'doc',
 ];
 
@@ -71,7 +71,9 @@ export function SearchView({
   onOpenSession: (id: string) => void;
 }) {
   const [q, setQ] = useState('');
-  const [source, setSource] = useState<SourceType | ''>('');
+  // A subset of source types; empty means all. Sent to the API as a
+  // comma-separated `source` param that parses back to sourceType(s).
+  const [sources, setSources] = useState<SourceType[]>([]);
   const [kind, setKind] = useState<EntryKind | ''>('');
   const [docStatus, setDocStatus] = useState<'' | 'active' | 'archived'>('');
   const [mode, setMode] = useState<'search' | 'ask'>('search');
@@ -82,7 +84,7 @@ export function SearchView({
   const [openEntry, setOpenEntry] = useState<number | null>(null);
   const seq = useRef(0);
 
-  const ask = useAskConversation(project, setOpenEntry);
+  const ask = useAskConversation(project, setOpenEntry, sources);
   const busy = ask.turns.some((t) => t.streaming);
 
   const runSearch = useCallback(async () => {
@@ -93,7 +95,7 @@ export function SearchView({
     setScopeChanged(false);
     setLoading(true);
     try {
-      const r = await api.search({ q, project, source, kind, docStatus, limit: 30 });
+      const r = await api.search({ q, project, source: sources.join(','), kind, docStatus, limit: 30 });
       if (seq.current === mySeq) setResult(r);
     } catch (e) {
       if (seq.current === mySeq) {
@@ -103,7 +105,7 @@ export function SearchView({
     } finally {
       if (seq.current === mySeq) setLoading(false);
     }
-  }, [q, project, source, kind, docStatus]);
+  }, [q, project, sources, kind, docStatus]);
 
   const runAsk = useCallback(() => {
     if (!q.trim() || busy) return;
@@ -155,18 +157,13 @@ export function SearchView({
           className="flex-1 bg-panel border border-line rounded-md px-4 py-3 text-[15px] placeholder:text-faint"
           aria-label="Search query"
         />
-        <select
-          value={source}
-          onChange={(e) => setSource(e.target.value as SourceType | '')}
-          className="bg-panel border border-line rounded-md px-2 py-3 text-sm text-muted font-mono"
-          aria-label="Source filter"
-        >
-          {SOURCES.map((s) => (
-            <option key={s} value={s}>
-              {s === '' ? 'all sources' : s}
-            </option>
-          ))}
-        </select>
+        <MultiSelect
+          options={SOURCES}
+          selected={sources}
+          onChange={setSources}
+          allLabel="all sources"
+          label="Source filter"
+        />
         <select
           value={kind}
           onChange={(e) => setKind(e.target.value as EntryKind | '')}
@@ -217,7 +214,9 @@ export function SearchView({
       <div className="mt-2 flex items-center gap-3 font-mono text-[11px] text-faint">
         <span>
           scope: <span className="text-muted">{scopeLabel}</span>
-          {source && <span className="text-muted"> · {source}</span>}
+          {sources.length > 0 && (
+            <span className="text-muted"> · {sources.length === 1 ? sources[0] : `${sources.length} sources`}</span>
+          )}
           {kind && <span className="text-muted"> · {kind}</span>}
           {docStatus && (
             <span className="text-muted">
@@ -227,8 +226,16 @@ export function SearchView({
           )}
         </span>
         {ask.turns.length > 0 && (
-          <button onClick={ask.reset} className="text-muted hover:text-ink underline underline-offset-2">
-            new conversation
+          <button
+            onClick={ask.reset}
+            className="ml-auto inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-[11px] font-medium hover:brightness-110"
+            style={{
+              borderColor: 'var(--color-kdb)',
+              color: 'var(--color-kdb)',
+              background: 'color-mix(in srgb, var(--color-kdb) 10%, transparent)',
+            }}
+          >
+            ＋ New conversation
           </button>
         )}
       </div>

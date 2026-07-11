@@ -2,7 +2,7 @@ import type { AppConfig } from './config.js';
 import { chatComplete, chatStream, type ChatMessage } from './llm.js';
 import type { SearchService } from './search.js';
 import type { Catalog } from './catalog.js';
-import type { AskResult, AskSource, SearchFilters, SearchHit } from './types.js';
+import type { AskResult, AskSource, ScopeFallback, SearchFilters, SearchHit } from './types.js';
 
 /**
  * Ask mode: retrieve → synthesize with citations. The LLM sees numbered
@@ -15,6 +15,10 @@ const SYSTEM_PROMPT =
   'Claude Code sessions, git commits, docs). Cite sources inline as [n] after each ' +
   'claim. If the context is insufficient, say exactly what is missing. Be concrete: ' +
   'name components, dates, files and root causes. Answer in the language of the question. ' +
+  'Lead with a direct answer to what was asked — if the question is "what is X", the first ' +
+  'sentence must define X and what it does, before any background, history or meta-commentary. ' +
+  'Prefer sources that describe the subject (docs, component logs) over transcripts that merely ' +
+  'mention it. ' +
   'Context blocks may be labeled [ARCHIVED — …] or [AGING — …]: prefer active and recent ' +
   'sources, say so explicitly when you rely on labeled material, and when sources ' +
   'conflict, trust the newer one. ' +
@@ -30,6 +34,75 @@ export interface AskTurn {
 
 /** Older turns are dropped rather than blowing the model's context window. */
 const MAX_HISTORY_TURNS = 12;
+
+/**
+ * Context-quality reranking for Ask.
+ *
+ * Raw relevance ranks by lexical/semantic match, which a tool that indexes its
+ * own operators' conversations gets badly wrong: a debugging transcript about
+ * "the drain feature" matches a question about the drain feature far more
+ * strongly than the doc that *explains* draining (the doc says "stops routing
+ * new traffic", never echoing the question's words). So the answer ends up
+ * synthesized from chatter, not documentation.
+ *
+ * Two levers fix this without a reindex:
+ *  - a per-type score multiplier that lifts authoritative sources (docs, kdb
+ *    component/changelog logs) above raw session/commit noise, and
+ *  - a hard cap on how many claude_session blocks may fill the context window,
+ *    so even when sessions dominate the pool, explanatory sources still land.
+ */
+const SOURCE_WEIGHT: Partial<Record<string, number>> = {
+  doc: 1.35,
+  kdb_component: 1.3,
+  kdb_changelog: 1.15,
+  kdb_report: 1.15,
+  kdb_backlog: 1.05,
+  git_commit: 1.0,
+  kdb_session: 0.95,
+  claude_session: 0.8,
+};
+
+/**
+ * At most this fraction of the k context blocks may be claude_session. A
+ * question whose only matches are sessions still fills up (the cap only bites
+ * when better-typed hits exist to take the freed slots).
+ */
+const MAX_SESSION_FRACTION = 0.5;
+
+/**
+ * Rerank an over-fetched pool into the final k, applying the source weights and
+ * the session cap. Weighting alone is not enough — near-duplicate sessions can
+ * still crowd the window on raw score — so the cap is enforced structurally.
+ */
+export function rerankForContext(pool: SearchHit[], k: number): SearchHit[] {
+  const weighted = pool
+    .map((h) => ({ h, s: h.score * (SOURCE_WEIGHT[h.sourceType] ?? 1) }))
+    .sort((a, b) => b.s - a.s);
+
+  const maxSessions = Math.max(1, Math.floor(k * MAX_SESSION_FRACTION));
+  const picked: SearchHit[] = [];
+  const overflow: SearchHit[] = [];
+  let sessions = 0;
+  for (const { h } of weighted) {
+    if (picked.length >= k) break;
+    if (h.sourceType === 'claude_session') {
+      // Hold sessions past the cap in reserve rather than dropping them: if
+      // nothing else fills k (a genuinely session-only answer), they return.
+      if (sessions >= maxSessions) {
+        overflow.push(h);
+        continue;
+      }
+      sessions++;
+    }
+    picked.push(h);
+  }
+  // Backfill any remaining slots from the held-over sessions.
+  for (const h of overflow) {
+    if (picked.length >= k) break;
+    picked.push(h);
+  }
+  return picked;
+}
 
 const NO_MATCH =
   'No indexed content matched this question. Try a broader query or trigger a reindex.';
@@ -56,7 +129,7 @@ export function buildAskPrompt(question: string, hits: SearchHit[], bodies: Map<
 
 /** Events emitted by the streaming Ask pipeline, in order. */
 export type AskEvent =
-  | { type: 'sources'; sources: AskSource[] }
+  | { type: 'sources'; sources: AskSource[]; scopeFallback?: ScopeFallback }
   | { type: 'delta'; text: string }
   | { type: 'done'; model: string; degraded: boolean }
   | { type: 'error'; message: string };
@@ -64,6 +137,7 @@ export type AskEvent =
 interface Prepared {
   sources: AskSource[];
   messages: ChatMessage[] | null;
+  scopeFallback?: ScopeFallback;
 }
 
 export class AskService {
@@ -73,6 +147,44 @@ export class AskService {
     private llmConfig: AppConfig['llm'],
   ) {}
 
+  /**
+   * Retrieve for the question, honoring the project scope but never letting it
+   * hide an answer that lives elsewhere.
+   *
+   * A hard project filter is the right default — a scoped question usually
+   * wants scoped results. But when it matches *nothing* in that project, the
+   * honest empty result reads as "this feature does not exist" even when it was
+   * built in a sibling project (the real bug: asking about G2P's NEXUS drain
+   * while scoped to `deepcast`, where it was indexed under `google-gemini-pool`).
+   * So on an empty scoped result we widen to all projects and flag it, rather
+   * than returning a confident non-answer.
+   */
+  private async retrieve(
+    question: string,
+    filters: SearchFilters,
+    k: number,
+  ): Promise<{ hits: SearchHit[]; scopeFallback?: ScopeFallback }> {
+    // Over-fetch so rerankForContext has authoritative hits to promote into the
+    // window; the raw top-k is often all sessions.
+    const pool = Math.min(Math.max(k * 3, 24), 60);
+    const { hits } = await this.searchService.search(question, filters, pool);
+    if (hits.length) return { hits: rerankForContext(hits, k) };
+    if (!filters.project) return { hits };
+
+    const { hits: wide } = await this.searchService.search(
+      question,
+      { ...filters, project: undefined },
+      pool,
+    );
+    // Only report a fallback if widening actually surfaced something; an
+    // all-projects miss is a genuine dead end, not a scope problem.
+    if (!wide.length) return { hits };
+    return {
+      hits: rerankForContext(wide, k),
+      scopeFallback: { requested: filters.project, usedAllProjects: true },
+    };
+  }
+
   /** Shared retrieval: both ask() and askStream() build their prompt here. */
   private async prepare(
     question: string,
@@ -80,7 +192,7 @@ export class AskService {
     k: number,
     history: AskTurn[] = [],
   ): Promise<Prepared> {
-    const { hits } = await this.searchService.search(question, filters, k);
+    const { hits, scopeFallback } = await this.retrieve(question, filters, k);
     const sources: AskSource[] = hits.map((h, i) => ({
       n: i + 1,
       entryId: h.entryId,
@@ -100,16 +212,25 @@ export class AskService {
     const bodies = new Map<number, string>(
       [...rows.entries()].map(([id, row]) => [id, String(row.body)]),
     );
+    // When the scope was widened, tell the model so the answer opens by naming
+    // the empty scope and where the answer actually came from — otherwise the
+    // user never learns their scope was wrong.
+    const scopeNote = scopeFallback
+      ? `\n\nNote: nothing matched in project "${scopeFallback.requested}", so this ` +
+        'searched all projects instead. Say so briefly at the start of your answer ' +
+        'and name which project(s) the answer comes from.'
+      : '';
     // Prior turns come *before* the fresh context, so the model reads
     // "conversation so far" then "here is what I found for the newest
     // question" — the [n] citations always refer to the block below them.
     const recent = history.slice(-MAX_HISTORY_TURNS);
     return {
       sources,
+      scopeFallback,
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         ...recent.map((t) => ({ role: t.role, content: t.content }) as ChatMessage),
-        { role: 'user', content: buildAskPrompt(question, hits, bodies) },
+        { role: 'user', content: buildAskPrompt(question, hits, bodies) + scopeNote },
       ],
     };
   }
@@ -120,13 +241,13 @@ export class AskService {
     k = 12,
     history: AskTurn[] = [],
   ): Promise<AskResult> {
-    const { sources, messages } = await this.prepare(question, filters, k, history);
+    const { sources, messages, scopeFallback } = await this.prepare(question, filters, k, history);
     if (!messages) {
       return { answer: NO_MATCH, sources: [], model: this.llmConfig.model, degraded: false };
     }
     try {
       const answer = await chatComplete(this.llmConfig, messages);
-      return { answer, sources, model: this.llmConfig.model, degraded: false };
+      return { answer, sources, model: this.llmConfig.model, degraded: false, scopeFallback };
     } catch (e) {
       // LLM down: still useful — return the retrieved sources with an explanation.
       return {
@@ -136,6 +257,7 @@ export class AskService {
         sources,
         model: this.llmConfig.model,
         degraded: true,
+        scopeFallback,
       };
     }
   }
@@ -158,7 +280,11 @@ export class AskService {
       return;
     }
 
-    yield { type: 'sources', sources: prepared.sources };
+    yield {
+      type: 'sources',
+      sources: prepared.sources,
+      ...(prepared.scopeFallback ? { scopeFallback: prepared.scopeFallback } : {}),
+    };
 
     if (!prepared.messages) {
       yield { type: 'delta', text: NO_MATCH };

@@ -64,3 +64,30 @@
 
 **AI Response Summary:**
 > Designed and shipped the staleness model (archived stored from path conventions, aging derived at query time, downrank+label everywhere incl. Ask/MCP/CLI/UI, version-forced payload backfill, docs cap 2000 with loud truncation) plus a dashboard overhaul (30-day activity chart, per-source files/volume/last-indexed, recent runs). 310 tests green; docs + ADR updated; committed and pushed.
+
+---
+### [2026-07-11 01:35 UTC]
+
+**User Prompt Summary:**
+> Investigate why kdb_ask couldn't find a just-built G2P "NEXUS drain" feature (indexing lag? source? code?) and harden KDB so it can't recur; also report any indexing/time lag between kdb logs, docs, sessions and the index.
+
+**AI Response Summary:**
+> Root-caused it as query mis-scoping (answer lives in project google-gemini-pool; query was scoped to deepcast — a hard filter), NOT indexing lag (content searchable within one 5-min cycle, queue empty, recentErrors 0). Added Ask soft-scope auto-fallback (widen to all projects on empty scope + scopeFallback marker across core/API/MCP/UI), tests 313/313, verified the live repro. Logged phantom-duplicate-projects hygiene issue to backlog.
+
+---
+### [2026-07-11 04:32 UTC]
+
+**User Prompt Summary:**
+> After the scope fix, the Ask answer rendered as raw markdown and, though it gave context about the drain feature, never actually said what draining does — is it a prompt, context, or search issue? Plus: multi-select source filter, copy buttons on replies/sources, and a visible "new conversation" button.
+
+**AI Response Summary:**
+> Root-caused the weak answer as retrieval self-pollution (our own debug transcripts out-ranked the explanatory doc), confirmed by inspecting the live retrieved blocks. Added rerankForContext (doc/component boost + 50% claude_session cap over an over-fetched pool) and a "define first" prompt nudge — verified live: docs now fill half the window and the answer opens with a definition. Added sourceTypes multi-value filter (qdrant any / FTS ANY / api parseSources), UI markdown rendering (marked+DOMPurify), MultiSelect source picker, copy buttons for reply + each source, and a visible New-conversation pill. Suite 320/320, lint clean, containers rebuilt and verified.
+
+---
+### [2026-07-11 04:45 UTC]
+
+**User Prompt Summary:**
+> Update the test suite and documentation for the Ask-quality / multi-source / UI changes, then commit and push.
+
+**AI Response Summary:**
+> Documented the new behavior across api.md, mcp.md, architecture.md (new Ask-mode section) and cli.md with dated revision notes. Broadened tests: markdown XSS sanitization, MultiSelect + CopyButton, api parseSources (csv + array), ask source passthrough + scopeFallback capture (rerank + qdrant multi-value already covered). Suite 334/334, lint clean. Committing on a branch and pushing.
