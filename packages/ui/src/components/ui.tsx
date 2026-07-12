@@ -97,6 +97,83 @@ export function MultiSelect<T extends string>({
 }
 
 /**
+ * Search and Ask are not two actions on one box — they are two *modes* of one
+ * instrument, producing two different surfaces: a browsable list of records, or
+ * a synthesized answer that opens a conversation.
+ *
+ * As twin submit buttons they read as peers and forced the user to learn a
+ * secret handshake (⌘Enter) to reach the second one. As a segmented control they
+ * announce that a choice exists, show which one is armed, and let Enter mean the
+ * same thing in both.
+ */
+export function ModeSwitch<T extends string>({
+  value,
+  options,
+  onChange,
+  label,
+}: {
+  value: T;
+  options: { value: T; label: string; icon?: string; accent?: boolean }[];
+  onChange: (v: T) => void;
+  label: string;
+}) {
+  return (
+    <div
+      role="tablist"
+      aria-label={label}
+      className="inline-flex bg-panel border border-line rounded-lg p-0.5 gap-0.5"
+    >
+      {options.map((o) => {
+        const on = value === o.value;
+        return (
+          <button
+            key={o.value}
+            role="tab"
+            aria-selected={on}
+            onClick={() => onChange(o.value)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[13px] transition-colors ${
+              on ? 'text-ink' : 'text-muted hover:text-ink'
+            }`}
+            style={
+              on
+                ? o.accent
+                  ? {
+                      // Ask is the generative mode; it carries the accent so the
+                      // armed state is unmistakable before you type a word.
+                      background: 'color-mix(in srgb, var(--color-kdb) 12%, transparent)',
+                      boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--color-kdb) 45%, transparent)',
+                      color: 'var(--color-kdb)',
+                    }
+                  : { background: 'var(--color-panel-2)' }
+                : undefined
+            }
+          >
+            {o.icon && (
+              <span className="text-[11px]" aria-hidden>
+                {o.icon}
+              </span>
+            )}
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * Where a record came from. Shown only when the scope spans more than one
+ * project — in a single-project view it would be noise on every row.
+ */
+export function ProjectTag({ slug }: { slug: string }) {
+  return (
+    <span className="font-mono text-[9.5px] text-muted bg-panel-2 border border-line rounded-sm px-1.5 py-px whitespace-nowrap">
+      {slug}
+    </span>
+  );
+}
+
+/**
  * Copy `text` to the clipboard, flashing a check for confirmation. Kept tiny
  * and unstyled-by-default (className passthrough) so it drops into a reply
  * header or a source row alike.

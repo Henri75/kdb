@@ -30,14 +30,20 @@ function makeService(
   },
 ) {
   const search = {
-    search: async (_q: string, filters: { project?: string } = {}) => ({
-      // A project scope this fixture data does not belong to matches nothing —
-      // lets tests drive the empty-scope fallback path.
-      hits: filters.project && filters.project !== 'deepcast' ? [] : hits,
-      mode: 'hybrid',
-      degraded: false,
-      tookMs: 1,
-    }),
+    // Stands in for the real filter: the fixture data lives in `deepcast`, so a
+    // scope that does not include it matches nothing. Honours BOTH `project` and
+    // `projects` — a mock that only knew the singular would report a partial
+    // multi-project match as a full one and hide the very bug these tests exist
+    // to catch.
+    search: async (_q: string, filters: { project?: string; projects?: string[] } = {}) => {
+      const scope = filters.projects?.length
+        ? filters.projects
+        : filters.project
+          ? [filters.project]
+          : [];
+      const inScope = scope.length === 0 || scope.includes('deepcast');
+      return { hits: inScope ? hits : [], mode: 'hybrid', degraded: false, tookMs: 1 };
+    },
   };
   const catalog = {
     getEntries: async (ids: number[]) => new Map(ids.map((i) => [i, { body: 'full body' }])),
@@ -195,7 +201,9 @@ describe('AskService.askStream', () => {
     const sources = events.find((e) => e.type === 'sources') as any;
     expect(sources.sources).toHaveLength(1);
     expect(sources.scopeFallback).toEqual({
-      requested: 'google-gemini-pool',
+      // A list even for one project: a scope can hold several, and the banner
+      // must be able to name every project that came up empty.
+      requested: ['google-gemini-pool'],
       usedAllProjects: true,
     });
     const text = events.filter((e) => e.type === 'delta').map((e: any) => e.text).join('');
@@ -209,6 +217,40 @@ describe('AskService.askStream', () => {
     const sources = events.find((e) => e.type === 'sources') as any;
     expect(sources.sources).toHaveLength(1);
     expect(sources.scopeFallback).toBeUndefined();
+  });
+
+  /**
+   * Multi-project scope. The rule generalises rather than merely accepting a
+   * list: with several projects selected, *any* hit means the scope worked —
+   * the projects that returned nothing simply had nothing to say. Widening on a
+   * partial match would fire on nearly every multi-project ask.
+   */
+  it('answers from whatever matched, without widening, on a partial match', async () => {
+    // `hit` lives in deepcast; the scope also names a project it never matches.
+    const svc = makeService([hit], frame('found in deepcast [1]'));
+    const events = await collect(
+      svc.askStream('q', { projects: ['deepcast', 'never-matches'] }),
+    );
+
+    const sources = events.find((e) => e.type === 'sources') as any;
+    expect(sources.sources).toHaveLength(1);
+    // The scope worked. No fallback, no banner.
+    expect(sources.scopeFallback).toBeUndefined();
+  });
+
+  it('widens only when NONE of the selected projects match', async () => {
+    const svc = makeService([hit], frame('it lives elsewhere [1]'));
+    const events = await collect(
+      svc.askStream('q', { projects: ['nope-one', 'nope-two'] }),
+    );
+
+    const sources = events.find((e) => e.type === 'sources') as any;
+    // Every requested project is named — the user needs to see the whole set
+    // that came up empty, not just one of them.
+    expect(sources.scopeFallback).toEqual({
+      requested: ['nope-one', 'nope-two'],
+      usedAllProjects: true,
+    });
   });
 
   it('reports no match when nothing matches even after widening', async () => {

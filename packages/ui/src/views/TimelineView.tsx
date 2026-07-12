@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import type { ProjectRow, TimelineItem } from '../types';
+import type { Scope } from '../useScope';
 import {
   Badge,
   Empty,
   Eyebrow,
   FilterInput,
   Highlight,
-  PickProject,
+  ProjectTag,
   SpineRow,
   Spinner,
   Stamp,
@@ -25,14 +26,12 @@ type Layout = 'feed' | 'table';
  *    per-visit decision.
  */
 export function TimelineView({
-  project,
+  scope,
   projects,
-  onProject,
   onOpenSession,
 }: {
-  project: string;
+  scope: Scope;
   projects: ProjectRow[];
-  onProject: (slug: string) => void;
   onOpenSession: (id: string) => void;
 }) {
   const [items, setItems] = useState<TimelineItem[]>([]);
@@ -41,11 +40,15 @@ export function TimelineView({
   const [q, setQ] = useState('');
   const [layout, setLayout] = usePersistentState<Layout>('kdbscope.timeline.layout', 'feed');
 
+  // An empty scope means *all* projects, which the feed can render as readily as
+  // one — every item carries its own project, so a merged feed stays legible.
+  const slugs = scope.isAll ? projects.map((p) => p.slug) : scope.projects;
+
   const load = async (before?: string) => {
-    if (!project) return;
+    if (!slugs.length) return;
     setLoading(true);
     try {
-      const r = await api.timeline(project, { limit: 60, before });
+      const r = await api.timeline(slugs, { limit: 60, before });
       setItems((prev) => (before ? [...prev, ...r.items] : r.items));
       setDone(r.items.length < 60);
     } finally {
@@ -59,21 +62,21 @@ export function TimelineView({
     setQ('');
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project]);
+  }, [slugs.join(',')]);
 
   const shown = useMemo(
     () => items.filter((t) => matches(t.title, q) || matches(t.component, q)),
     [items, q],
   );
 
-  if (!project) return <PickProject what="timeline" projects={projects} onProject={onProject} />;
-
   const openIfSession = (t: TimelineItem) => (t.sessionId ? () => onOpenSession(t.sessionId!) : undefined);
 
   return (
     <div className="max-w-5xl mx-auto">
       <div className="flex items-baseline justify-between">
-        <Eyebrow>Timeline — {project}</Eyebrow>
+        <Eyebrow>
+          Timeline — {scope.isAll ? 'all projects' : scope.projects.join(' + ')}
+        </Eyebrow>
         <div className="flex gap-1 mb-2" role="group" aria-label="Layout">
           {(['feed', 'table'] as Layout[]).map((l) => (
             <button
@@ -100,9 +103,9 @@ export function TimelineView({
       />
 
       {layout === 'table' ? (
-        <TableLayout items={shown} needle={q} onOpen={openIfSession} />
+        <TableLayout items={shown} needle={q} onOpen={openIfSession} showProjects={scope.isMulti} />
       ) : (
-        <FeedLayout items={shown} needle={q} onOpen={openIfSession} />
+        <FeedLayout items={shown} needle={q} onOpen={openIfSession} showProjects={scope.isMulti} />
       )}
 
       {loading && <Spinner />}
@@ -129,10 +132,12 @@ function FeedLayout({
   items,
   needle,
   onOpen,
+  showProjects,
 }: {
   items: TimelineItem[];
   needle: string;
   onOpen: (t: TimelineItem) => (() => void) | undefined;
+  showProjects: boolean;
 }) {
   let lastDay = '';
   return (
@@ -153,6 +158,9 @@ function FeedLayout({
               <div className="flex items-baseline gap-2">
                 <Stamp iso={t.occurredAt} />
                 <Badge source={t.sourceType} />
+                {/* A merged feed is unreadable without saying which project each
+                    row came from; a single-project feed does not need telling. */}
+                {showProjects && <ProjectTag slug={t.projectSlug} />}
                 {t.component && (
                   <span className="font-mono text-[11px] text-muted">
                     <Highlight text={t.component} needle={needle} />
@@ -175,10 +183,12 @@ function TableLayout({
   items,
   needle,
   onOpen,
+  showProjects,
 }: {
   items: TimelineItem[];
   needle: string;
   onOpen: (t: TimelineItem) => (() => void) | undefined;
+  showProjects: boolean;
 }) {
   return (
     <div className="overflow-x-auto">
@@ -188,6 +198,7 @@ function TableLayout({
             <th className="py-1.5 pr-3 font-normal">Date</th>
             <th className="py-1.5 pr-3 font-normal">Time</th>
             <th className="py-1.5 pr-3 font-normal">Source</th>
+            {showProjects && <th className="py-1.5 pr-3 font-normal">Project</th>}
             <th className="py-1.5 pr-3 font-normal">Component</th>
             <th className="py-1.5 font-normal">What happened</th>
           </tr>
@@ -211,6 +222,11 @@ function TableLayout({
                 <td className="py-1.5 pr-3 whitespace-nowrap">
                   <Badge source={t.sourceType} />
                 </td>
+                {showProjects && (
+                  <td className="py-1.5 pr-3 whitespace-nowrap">
+                    <ProjectTag slug={t.projectSlug} />
+                  </td>
+                )}
                 <td className="py-1.5 pr-3 font-mono text-[11px] text-muted max-w-40 truncate">
                   {t.component ? <Highlight text={t.component} needle={needle} /> : '—'}
                 </td>

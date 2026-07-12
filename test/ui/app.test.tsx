@@ -42,22 +42,44 @@ const stubOk = () =>
 afterEach(cleanup);
 
 describe('App shell', () => {
-  it('renders the sidebar with projects and stats', async () => {
+  /**
+   * The rail holds *views only* now. Projects moved to the scope bar above the
+   * content, because "how am I looking" and "what am I looking at" are different
+   * axes and stacking them in one column is what made the panel hard to read.
+   */
+  it('renders a views-only rail, with the index stats in the footer', async () => {
     stubOk();
     render(<App />);
     expect(screen.getByText('Atlas')).toBeTruthy();
-    await waitFor(() => expect(screen.getByText('deepcast')).toBeTruthy());
     // "Overview" is both the nav item and the page heading.
     expect(screen.getAllByText('Overview').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('Search & Ask')).toBeTruthy();
+    // Index stats still live in the rail's footer (matched on the title, since
+    // the line itself is split across several elements).
+    await waitFor(() =>
+      expect(screen.getByTitle(/142,555 entries · 157,135 chunks/)).toBeTruthy(),
+    );
+    // The project list is NOT in the rail any more — it moved to the scope bar.
+    expect(screen.queryByText('deepcast')).toBeNull();
   });
 
-  /** 81633 in a monospace column is unreadable and makes the column jitter. */
-  it('shows compact project counts, with the exact value on hover', async () => {
+  /** The overview is global by definition; a scope bar over it would imply a filter it never applies. */
+  it('shows no scope bar on the overview', async () => {
     stubOk();
     render(<App />);
-    const count = await screen.findByTitle(`${(81633).toLocaleString()} entries`);
-    expect(count.textContent).toBe('82k');
+    await waitFor(() => expect(screen.getByText('Services')).toBeTruthy());
+    expect(screen.queryByLabelText('Add a project to the scope')).toBeNull();
+  });
+
+  it('shows the scope bar on the views a project actually filters', async () => {
+    stubOk();
+    render(<App />);
+    fireEvent.click(await screen.findByText('Search & Ask'));
+    await waitFor(() =>
+      expect(screen.getByLabelText('Add a project to the scope')).toBeTruthy(),
+    );
+    // Nothing selected means everything — said out loud, not left blank.
+    expect(screen.getByText('all projects')).toBeTruthy();
   });
 
   /** Arriving, the question is "is this healthy and what's in it?" */
@@ -73,8 +95,10 @@ describe('App shell', () => {
     render(<App />);
     const cta = await screen.findByText('Search & Ask →');
     fireEvent.click(cta);
+    // Search is the default mode: Ask is now a deliberate choice on the mode
+    // switch, not a hidden ⌘Enter on a shared box.
     await waitFor(() =>
-      expect(screen.getByText('Ask your codebases what happened.')).toBeTruthy(),
+      expect(screen.getByText('Search everything you have built.')).toBeTruthy(),
     );
   });
 

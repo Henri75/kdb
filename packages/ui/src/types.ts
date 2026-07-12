@@ -45,7 +45,8 @@ export interface AskSource {
 }
 
 export interface ScopeFallback {
-  requested: string;
+  /** Every project the scope asked for — widening fires only if none matched. */
+  requested: string[];
   usedAllProjects: true;
 }
 

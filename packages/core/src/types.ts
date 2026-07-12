@@ -91,7 +91,15 @@ export const ALL_ENTRY_KINDS: EntryKind[] = [
 ];
 
 export interface SearchFilters {
+  /** Single project. Kept for back-compat (CLI, MCP); prefer `projects`. */
   project?: string;
+  /**
+   * Restrict to any of these projects. Empty/undefined means all.
+   *
+   * Wins over `project` when non-empty — the same precedence `sourceTypes` has
+   * over `sourceType`, so both filters read the same way at every call site.
+   */
+  projects?: string[];
   /** Single source type. Kept for back-compat; prefer sourceTypes for a subset. */
   sourceType?: SourceType;
   /** Restrict to any of these source types. Empty/undefined means all. */
@@ -152,10 +160,28 @@ export interface AskSource {
  * a sibling project (e.g. asking about G2P scoped to `deepcast`) looked absent.
  */
 export interface ScopeFallback {
-  /** The project the caller asked to scope to. */
-  requested: string;
+  /**
+   * The project(s) the caller asked to scope to. A list, because a scope can now
+   * hold several: widening fires only when *none* of them matched, so the user
+   * needs to see the whole set that came up empty, not just one of them.
+   */
+  requested: string[];
   /** True once the search was widened to every project. */
   usedAllProjects: true;
+}
+
+/**
+ * The projects a filter selects, as one list — `projects` if given, else the
+ * singular `project`, else empty (meaning *all*).
+ *
+ * Shared by both search paths (Qdrant and the Postgres FTS fallback) so they can
+ * never disagree about precedence. They degrade into one another, and a filter
+ * that means different things depending on which backend answered would be a
+ * genuinely nasty bug to chase.
+ */
+export function selectedProjects(filters: SearchFilters): string[] {
+  if (filters.projects?.length) return filters.projects;
+  return filters.project ? [filters.project] : [];
 }
 
 export interface AskResult {
@@ -175,6 +201,8 @@ export interface TimelineItem {
   title: string;
   occurredAt: string;
   sourcePath: string;
+  /** Which project this came from — a merged feed is unreadable without it. */
+  projectSlug: string;
 }
 
 export interface IndexStats {

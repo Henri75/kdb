@@ -1,11 +1,33 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import type { EntryKind, SearchResult, SourceType } from '../types';
-import { Badge, DegradedBanner, Empty, MultiSelect, SpineRow, Spinner, Stamp } from '../components/ui';
+import type { Scope } from '../useScope';
+import { scopeParam } from '../useScope';
+import {
+  Badge,
+  DegradedBanner,
+  Empty,
+  ModeSwitch,
+  MultiSelect,
+  ProjectTag,
+  SpineRow,
+  Spinner,
+  Stamp,
+} from '../components/ui';
 import { EntryDrawer } from '../components/EntryDrawer';
 import { AskComposer, Conversation, useAskConversation } from './AskConversation';
 
-/** Search + Ask: one input, two modes. '/' focuses; Enter searches; ⌘Enter asks. */
+/**
+ * Search and Ask: one instrument, two modes.
+ *
+ * They used to be twin submit buttons on a shared box, distinguished only by a
+ * modifier key. But they produce different *surfaces* — a list of records you
+ * browse, or a synthesized answer that opens a conversation — so the mode is now
+ * an explicit, visible state of the input rather than a second button competing
+ * with the first.
+ */
+
+type Mode = 'search' | 'ask';
 
 const SOURCES: SourceType[] = [
   'kdb_changelog', 'kdb_component', 'kdb_session', 'kdb_backlog',
@@ -62,40 +84,48 @@ function describeError(e: unknown): string {
 }
 
 export function SearchView({
-  project,
+  scope,
   inputRef,
   onOpenSession,
 }: {
-  project: string;
+  scope: Scope;
   inputRef: React.RefObject<HTMLInputElement | null>;
   onOpenSession: (id: string) => void;
 }) {
   const [q, setQ] = useState('');
+  const [mode, setMode] = useState<Mode>('search');
   // A subset of source types; empty means all. Sent to the API as a
   // comma-separated `source` param that parses back to sourceType(s).
   const [sources, setSources] = useState<SourceType[]>([]);
   const [kind, setKind] = useState<EntryKind | ''>('');
   const [docStatus, setDocStatus] = useState<'' | 'active' | 'archived'>('');
-  const [mode, setMode] = useState<'search' | 'ask'>('search');
   const [result, setResult] = useState<SearchResult | null>(null);
+  const [showing, setShowing] = useState<Mode | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [scopeChanged, setScopeChanged] = useState(false);
   const [openEntry, setOpenEntry] = useState<number | null>(null);
   const seq = useRef(0);
 
-  const ask = useAskConversation(project, setOpenEntry, sources);
+  const ask = useAskConversation(scope.projects, setOpenEntry, sources);
   const busy = ask.turns.some((t) => t.streaming);
 
   const runSearch = useCallback(async () => {
     if (!q.trim()) return;
     const mySeq = ++seq.current;
-    setMode('search');
+    setShowing('search');
     setError('');
     setScopeChanged(false);
     setLoading(true);
     try {
-      const r = await api.search({ q, project, source: sources.join(','), kind, docStatus, limit: 30 });
+      const r = await api.search({
+        q,
+        project: scopeParam(scope.projects),
+        source: sources.join(','),
+        kind,
+        docStatus,
+        limit: 30,
+      });
       if (seq.current === mySeq) setResult(r);
     } catch (e) {
       if (seq.current === mySeq) {
@@ -105,24 +135,30 @@ export function SearchView({
     } finally {
       if (seq.current === mySeq) setLoading(false);
     }
-  }, [q, project, sources, kind, docStatus]);
+  }, [q, scope.projects, sources, kind, docStatus]);
 
   const runAsk = useCallback(() => {
     if (!q.trim() || busy) return;
-    setMode('ask');
+    setShowing('ask');
     setError('');
     setScopeChanged(false);
     ask.send(q.trim());
     setQ('');
   }, [q, busy, ask]);
 
+  const submit = useCallback(() => {
+    if (mode === 'ask') runAsk();
+    else void runSearch();
+  }, [mode, runAsk, runSearch]);
+
   /**
-   * Changing the project changes what any answer *means*: its citations point
-   * at entries from the old scope. Keeping them on screen is worse than
-   * clearing, so drop the results and say why rather than leave the user
-   * wondering whether the panel refreshed.
+   * Changing the scope changes what any answer *means*: its citations point at
+   * entries from the old scope. Keeping them on screen is worse than clearing,
+   * so drop the results and say why rather than leave the user wondering whether
+   * the panel refreshed.
    */
   const first = useRef(true);
+  const scopeKey = scope.projects.join(',');
   useEffect(() => {
     if (first.current) {
       first.current = false;
@@ -134,29 +170,79 @@ export function SearchView({
     setError('');
     setScopeChanged(had);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project]);
+  }, [scopeKey]);
 
-  const scopeLabel = project || 'all projects';
+  const scopeLabel = scope.isAll ? 'all projects' : scope.projects.join(', ');
+  const asking = mode === 'ask';
 
   return (
     <div className="max-w-4xl mx-auto">
-      <div className="flex gap-2 items-center">
-        <input
-          ref={inputRef}
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key !== 'Enter') return;
-            e.metaKey || e.ctrlKey ? runAsk() : void runSearch();
-          }}
-          placeholder={
-            ask.turns.length
-              ? 'Ask a follow-up… (⌘Enter)'
-              : 'Search everything… (Enter = search, ⌘Enter = ask)'
-          }
-          className="flex-1 bg-panel border border-line rounded-md px-4 py-3 text-[15px] placeholder:text-faint"
-          aria-label="Search query"
+      <div className="flex items-center gap-3">
+        <ModeSwitch<Mode>
+          value={mode}
+          onChange={setMode}
+          label="Search or ask"
+          options={[
+            { value: 'search', label: 'Search', icon: '⌕' },
+            { value: 'ask', label: 'Ask', icon: '✦', accent: true },
+          ]}
         />
+        <p className="font-mono text-[11px] text-faint">
+          {asking ? 'a cited answer, synthesized from your projects' : 'browse matching records'}
+        </p>
+      </div>
+
+      <div className="mt-2.5 flex gap-2 items-center">
+        <div
+          className="flex-1 flex items-center gap-2 rounded-md border px-4 py-3"
+          style={
+            asking
+              ? {
+                  // The armed mode is legible before a word is typed.
+                  borderColor: 'color-mix(in srgb, var(--color-kdb) 50%, transparent)',
+                  background: 'color-mix(in srgb, var(--color-kdb) 4%, var(--color-panel))',
+                }
+              : { borderColor: 'var(--color-line)', background: 'var(--color-panel)' }
+          }
+        >
+          <input
+            ref={inputRef}
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && submit()}
+            placeholder={
+              asking
+                ? ask.turns.length
+                  ? 'Ask a follow-up…'
+                  : `Ask about ${scopeLabel}…`
+                : `Search ${scopeLabel}…`
+            }
+            className="flex-1 bg-transparent outline-none text-[15px] placeholder:text-faint"
+            aria-label={asking ? 'Ask a question' : 'Search query'}
+          />
+          <kbd className="font-mono text-[10px] text-faint border border-line rounded px-1.5 py-0.5">
+            ↵
+          </kbd>
+        </div>
+        <button
+          onClick={submit}
+          disabled={asking && busy}
+          className="px-4 py-3 rounded-md text-sm font-medium border disabled:opacity-50 whitespace-nowrap"
+          style={
+            asking
+              ? {
+                  borderColor: 'var(--color-kdb)',
+                  color: 'var(--color-kdb)',
+                  background: 'color-mix(in srgb, var(--color-kdb) 8%, transparent)',
+                }
+              : { borderColor: 'var(--color-line)', background: 'var(--color-panel-2)' }
+          }
+        >
+          {asking ? (ask.turns.length ? 'Follow up' : 'Ask') : 'Search'}
+        </button>
+      </div>
+
+      <div className="mt-2.5 flex items-center gap-2 flex-wrap">
         <MultiSelect
           options={SOURCES}
           selected={sources}
@@ -167,7 +253,7 @@ export function SearchView({
         <select
           value={kind}
           onChange={(e) => setKind(e.target.value as EntryKind | '')}
-          className="bg-panel border border-line rounded-md px-2 py-3 text-sm text-muted font-mono"
+          className="bg-panel border border-line rounded-md px-2 py-2 text-sm text-muted font-mono"
           aria-label="Message kind filter"
           title="Session messages are classified: insights, plans, summaries, actions…"
         >
@@ -180,7 +266,7 @@ export function SearchView({
         <select
           value={docStatus}
           onChange={(e) => setDocStatus(e.target.value as '' | 'active' | 'archived')}
-          className="bg-panel border border-line rounded-md px-2 py-3 text-sm text-muted font-mono"
+          className="bg-panel border border-line rounded-md px-2 py-2 text-sm text-muted font-mono"
           aria-label="Doc status filter"
           title="Docs under archive-style paths are downranked by default; exclude or target them here."
         >
@@ -190,45 +276,11 @@ export function SearchView({
             </option>
           ))}
         </select>
-        <button
-          onClick={() => void runSearch()}
-          className="px-4 py-3 rounded-md bg-panel-2 border border-line text-sm hover:border-faint"
-        >
-          Search
-        </button>
-        <button
-          onClick={runAsk}
-          disabled={busy}
-          className="px-4 py-3 rounded-md text-sm font-medium border disabled:opacity-50"
-          style={{
-            borderColor: 'var(--color-kdb)',
-            color: 'var(--color-kdb)',
-            background: 'color-mix(in srgb, var(--color-kdb) 8%, transparent)',
-          }}
-        >
-          {ask.turns.length ? 'Follow up' : 'Ask'}
-        </button>
-      </div>
 
-      {/* Always say what is being searched — the sidebar selection is easy to lose. */}
-      <div className="mt-2 flex items-center gap-3 font-mono text-[11px] text-faint">
-        <span>
-          scope: <span className="text-muted">{scopeLabel}</span>
-          {sources.length > 0 && (
-            <span className="text-muted"> · {sources.length === 1 ? sources[0] : `${sources.length} sources`}</span>
-          )}
-          {kind && <span className="text-muted"> · {kind}</span>}
-          {docStatus && (
-            <span className="text-muted">
-              {' '}
-              · {DOC_STATUSES.find((s) => s.value === docStatus)?.label}
-            </span>
-          )}
-        </span>
         {ask.turns.length > 0 && (
           <button
             onClick={ask.reset}
-            className="ml-auto inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-[11px] font-medium hover:brightness-110"
+            className="ml-auto inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border text-[11px] font-medium hover:brightness-110"
             style={{
               borderColor: 'var(--color-kdb)',
               color: 'var(--color-kdb)',
@@ -242,12 +294,12 @@ export function SearchView({
 
       {scopeChanged && (
         <p className="mt-3 font-mono text-[11px]" style={{ color: 'var(--color-report)' }}>
-          Project changed to “{scopeLabel}” — previous results were for a different scope and have
+          Scope changed to “{scopeLabel}” — previous results were for a different scope and have
           been cleared. Ask or search again.
         </p>
       )}
 
-      {loading && <Spinner />}
+      {loading && <Spinner label="searching" />}
       {error && (
         <div
           role="alert"
@@ -262,18 +314,15 @@ export function SearchView({
         </div>
       )}
 
-      {mode === 'ask' && ask.turns.length > 0 && (
+      {showing === 'ask' && ask.turns.length > 0 && (
         <>
           <Conversation
             turns={ask.turns}
             onRetry={ask.retry}
             onDelete={ask.remove}
             onOpenEntry={setOpenEntry}
+            showProjects={scope.isMulti}
           />
-          {/* The follow-up field lives where the reading ends. The top bar is
-              off-screen after a long answer, and scrolling up to ask — then back
-              down to read — is the friction this removes. It shares `q` with the
-              top bar so there is only ever one question in flight. */}
           <AskComposer
             value={q}
             onChange={setQ}
@@ -284,7 +333,7 @@ export function SearchView({
         </>
       )}
 
-      {!loading && mode === 'search' && result && !error && (
+      {!loading && showing === 'search' && result && !error && (
         <div className="mt-6">
           {result.degraded && <DegradedBanner mode={result.mode} />}
           <p className="font-mono text-[11px] text-faint mb-3">
@@ -295,10 +344,12 @@ export function SearchView({
               <SpineRow key={`${h.entryId}`} source={h.sourceType} onClick={() => setOpenEntry(h.entryId)}>
                 <div className="flex items-baseline gap-2">
                   <Badge source={h.sourceType} />
+                  {/* Where a hit came from only matters when the scope can span
+                      projects; in a single-project view it is noise on every row. */}
+                  {scope.isMulti && <ProjectTag slug={h.projectSlug} />}
                   {h.component && (
                     <span className="font-mono text-[11px] text-muted">{h.component}</span>
                   )}
-                  <span className="font-mono text-[11px] text-faint">{h.projectSlug}</span>
                   <div className="flex-1" />
                   {h.sessionId && (
                     <button
@@ -319,7 +370,7 @@ export function SearchView({
               </SpineRow>
             ))}
             {result.hits.length === 0 && (
-              <Empty title="Nothing matched." hint="Try broader words, drop filters, or reindex." />
+              <Empty title="Nothing matched." hint="Try broader words, drop filters, or widen the scope." />
             )}
           </div>
         </div>
@@ -327,8 +378,12 @@ export function SearchView({
 
       {!result && ask.turns.length === 0 && !loading && !error && !scopeChanged && (
         <Empty
-          title="Ask your codebases what happened."
-          hint='Try "qdrant timeout fix", or Ask: "what were the bug fixes in video import?"'
+          title={asking ? 'Ask your codebases what happened.' : 'Search everything you have built.'}
+          hint={
+            asking
+              ? 'Try: "what were the bug fixes in video import?"'
+              : 'Try: "qdrant timeout fix" — or switch to Ask for a cited answer.'
+          }
         />
       )}
 

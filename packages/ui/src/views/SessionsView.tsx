@@ -179,7 +179,8 @@ export function SessionsView({
   openSessionId,
   onOpenSession,
 }: {
-  project: string;
+  /** Exactly one project, or null at 0 or 2+ — this view browses one. */
+  project: string | null;
   projects: ProjectRow[];
   onProject: (slug: string) => void;
   openSessionId: string;

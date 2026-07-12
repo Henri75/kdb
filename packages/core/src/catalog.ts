@@ -1,13 +1,14 @@
 import pg from 'pg';
-import type {
-  Entry,
-  IndexStats,
-  Project,
-  SearchFilters,
-  SearchHit,
-  SessionMeta,
-  SourceType,
-  TimelineItem,
+import {
+  selectedProjects,
+  type Entry,
+  type IndexStats,
+  type Project,
+  type SearchFilters,
+  type SearchHit,
+  type SessionMeta,
+  type SourceType,
+  type TimelineItem,
 } from './types.js';
 import { contentHash, deterministicUuid } from './ids.js';
 
@@ -307,13 +308,23 @@ export class Catalog {
     );
   }
 
+  /**
+   * A project's activity feed — or several projects', merged chronologically.
+   *
+   * Accepts one slug or many. The signature is *widened*, never changed: the CLI
+   * and the MCP server both call the single-slug form through
+   * `/api/projects/:slug/timeline`, and neither has a test that would have caught
+   * a break (the MCP suite only asserts the tool is listed).
+   */
   async timeline(
-    slug: string,
+    slug: string | string[],
     opts: { limit?: number; before?: string; sources?: SourceType[] } = {},
   ): Promise<TimelineItem[]> {
+    const slugs = Array.isArray(slug) ? slug : [slug];
     const limit = Math.min(opts.limit ?? 50, 200);
-    const params: unknown[] = [slug, limit];
-    let where = `p.slug = $1 AND e.occurred_at IS NOT NULL`;
+    const params: unknown[] = [slugs, limit];
+    // ANY() covers both cases, so one query serves a single project and a merge.
+    let where = `p.slug = ANY($1) AND e.occurred_at IS NOT NULL`;
     if (opts.before) {
       params.push(opts.before);
       where += ` AND e.occurred_at < $${params.length}`;
@@ -323,7 +334,10 @@ export class Catalog {
       where += ` AND e.source_type = ANY($${params.length})`;
     }
     const r = await this.pool.query(
-      `SELECT e.id, e.source_type, e.component, e.session_id, e.title, e.occurred_at, e.source_path
+      // p.slug rides along so a merged feed can say which project each row came
+      // from — without it, a multi-project timeline is unreadable.
+      `SELECT e.id, e.source_type, e.component, e.session_id, e.title, e.occurred_at, e.source_path,
+              p.slug AS project_slug
        FROM entries e JOIN projects p ON p.id = e.project_id
        WHERE ${where}
        ORDER BY e.occurred_at DESC, e.id DESC LIMIT $2`,
@@ -337,6 +351,7 @@ export class Catalog {
       title: row.title,
       occurredAt: row.occurred_at.toISOString(),
       sourcePath: row.source_path,
+      projectSlug: row.project_slug,
     }));
   }
 
@@ -473,9 +488,16 @@ export class Catalog {
   async ftsSearch(q: string, filters: SearchFilters, limit = 20): Promise<SearchHit[]> {
     const params: unknown[] = [q];
     let where = `e.fts @@ websearch_to_tsquery('english', $1)`;
-    if (filters.project) {
-      params.push(filters.project);
+    // Mirrors the vector path exactly (see buildQdrantFilter): one project is an
+    // equality, several are an ANY. The two paths degrade into one another, so a
+    // filter that meant different things on each would be a vicious bug.
+    const projects = selectedProjects(filters);
+    if (projects.length === 1) {
+      params.push(projects[0]);
       where += ` AND p.slug = $${params.length}`;
+    } else if (projects.length > 1) {
+      params.push(projects);
+      where += ` AND p.slug = ANY($${params.length})`;
     }
     // A subset (sourceTypes) wins over the single sourceType, which stays for
     // back-compat. One value → equality; several → ANY(array).

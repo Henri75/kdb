@@ -1,6 +1,10 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildApp } from '../../packages/api/src/app.js';
 import type { ApiDeps } from '../../packages/api/src/app.js';
+
+/** What each route handed to Catalog.timeline. Reset before every test. */
+const timelineCalls: { slug: string | string[]; opts: unknown }[] = [];
+beforeEach(() => (timelineCalls.length = 0));
 
 function makeDeps(overrides: Partial<ApiDeps> = {}): ApiDeps {
   return {
@@ -12,7 +16,20 @@ function makeDeps(overrides: Partial<ApiDeps> = {}): ApiDeps {
         { slug: 'deepcast', name: 'DeepCast', rootPath: '/data/code/DeepCast', entryCount: 10 },
         { slug: 'from-transcripts', name: 'x', rootPath: '', entryCount: 3 },
       ],
-      timeline: async () => [{ entryId: 1, title: 't', occurredAt: '2026-07-08T00:00:00Z' }],
+      // Records what the route actually passed, so back-compat can be asserted
+      // rather than assumed: the CLI and the MCP server both call the
+      // per-project path, and a canned return value proves nothing about it.
+      timeline: async (slug: string | string[], opts: unknown) => {
+        timelineCalls.push({ slug, opts });
+        return [
+          {
+            entryId: 1,
+            title: 't',
+            occurredAt: '2026-07-08T00:00:00Z',
+            projectSlug: Array.isArray(slug) ? slug[0] : slug,
+          },
+        ];
+      },
       components: async () => [{ component: 'video-import', count: 3 }],
       componentHistory: async () => [{ id: 1, title: 'x' }],
       sessionsList: async () => [{ id: 'abc' }],
@@ -169,7 +186,11 @@ describe('api routes', () => {
   });
 
   it('GET /api/search passes filters through', async () => {
-    const search = { search: vi.fn(async () => ({ hits: [], mode: 'hybrid', degraded: false, tookMs: 1 })) };
+    const search = {
+      search: vi.fn(async (_q: string, _f: Record<string, unknown>) => ({
+        hits: [], mode: 'hybrid', degraded: false, tookMs: 1,
+      })),
+    };
     const app = buildApp(makeDeps({ search: search as any }));
     const res = await app.request('/api/search?q=bug&project=deepcast&source=git_commit&limit=5');
     expect(res.status).toBe(200);
@@ -181,7 +202,11 @@ describe('api routes', () => {
   });
 
   it('GET /api/search parses a comma-separated source subset into sourceTypes', async () => {
-    const search = { search: vi.fn(async () => ({ hits: [], mode: 'hybrid', degraded: false, tookMs: 1 })) };
+    const search = {
+      search: vi.fn(async (_q: string, _f: Record<string, unknown>) => ({
+        hits: [], mode: 'hybrid', degraded: false, tookMs: 1,
+      })),
+    };
     const app = buildApp(makeDeps({ search: search as any }));
     await app.request('/api/search?q=bug&source=doc,kdb_component');
     expect(search.search).toHaveBeenCalledWith(
@@ -195,7 +220,11 @@ describe('api routes', () => {
   });
 
   it('POST /api/ask accepts source as a JSON array', async () => {
-    const ask = { ask: vi.fn(async () => ({ answer: 'a', sources: [], model: 'm', degraded: false })) };
+    const ask = {
+      ask: vi.fn(async (_q: string, _f: Record<string, unknown>) => ({
+        answer: 'a', sources: [], model: 'm', degraded: false,
+      })),
+    };
     const app = buildApp(makeDeps({ ask: ask as any }));
     await app.request('/api/ask', {
       method: 'POST',
@@ -224,7 +253,11 @@ describe('api routes', () => {
    * `system` turn and rewrite the assistant's instructions.
    */
   it('POST /api/ask whitelists conversation history', async () => {
-    const ask = { ask: vi.fn(async () => ({ answer: 'a', sources: [], model: 'm', degraded: false })) };
+    const ask = {
+      ask: vi.fn(async (_q: string, _f: Record<string, unknown>) => ({
+        answer: 'a', sources: [], model: 'm', degraded: false,
+      })),
+    };
     const app = buildApp(makeDeps({ ask: ask as any }));
     await app.request('/api/ask', {
       method: 'POST',
@@ -249,7 +282,11 @@ describe('api routes', () => {
   });
 
   it('POST /api/ask tolerates a missing history', async () => {
-    const ask = { ask: vi.fn(async () => ({ answer: 'a', sources: [], model: 'm', degraded: false })) };
+    const ask = {
+      ask: vi.fn(async (_q: string, _f: Record<string, unknown>) => ({
+        answer: 'a', sources: [], model: 'm', degraded: false,
+      })),
+    };
     const app = buildApp(makeDeps({ ask: ask as any }));
     await app.request('/api/ask', {
       method: 'POST',
@@ -260,7 +297,11 @@ describe('api routes', () => {
   });
 
   it('GET /api/search passes the kind filter through', async () => {
-    const search = { search: vi.fn(async () => ({ hits: [], mode: 'hybrid', degraded: false, tookMs: 1 })) };
+    const search = {
+      search: vi.fn(async (_q: string, _f: Record<string, unknown>) => ({
+        hits: [], mode: 'hybrid', degraded: false, tookMs: 1,
+      })),
+    };
     const app = buildApp(makeDeps({ search: search as any }));
     await app.request('/api/search?q=x&kind=insight');
     expect(search.search).toHaveBeenCalledWith('x', expect.objectContaining({ kind: 'insight' }), 20);
@@ -379,5 +420,108 @@ describe('api routes', () => {
     expect(body.hits[0].hostPath).toBe('/Users/nasta/__CODING NEW/DeepCast');
     // A commit sha is not a line number.
     expect(body.hits[0].editorUrl).not.toContain(':aaa111');
+  });
+});
+
+/**
+ * Timeline has two routes on purpose. The per-project one is a *resource*
+ * (`/projects/:slug/timeline`) and is called by the CLI (`atlas timeline`) and
+ * the MCP server — breaking it breaks both, and neither has a test of its own
+ * that would notice. The collection route is a *filter* and is where
+ * multi-project lives; cramming `a,b` into a slug that means "one project"
+ * would be the same category error this rework exists to fix.
+ */
+describe('timeline routes', () => {
+  it('BACK-COMPAT: the per-project route still passes a bare slug', async () => {
+    const app = buildApp(makeDeps());
+    const res = await app.request('/api/projects/deepcast/timeline');
+
+    expect(res.status).toBe(200);
+    // A bare string, not ['deepcast'] — this is the shape the CLI and MCP rely on.
+    expect(timelineCalls[0]!.slug).toBe('deepcast');
+    expect((await res.json()).items).toHaveLength(1);
+  });
+
+  it('BACK-COMPAT: the per-project route still forwards its options', async () => {
+    const app = buildApp(makeDeps());
+    await app.request('/api/projects/deepcast/timeline?limit=5&before=2026-01-01&sources=doc,git_commit');
+
+    expect(timelineCalls[0]!.opts).toEqual({
+      limit: 5,
+      before: '2026-01-01',
+      sources: ['doc', 'git_commit'],
+    });
+  });
+
+  it('the collection route merges several projects', async () => {
+    const app = buildApp(makeDeps());
+    const res = await app.request('/api/timeline?projects=deepcast,atlas');
+
+    expect(res.status).toBe(200);
+    expect(timelineCalls[0]!.slug).toEqual(['deepcast', 'atlas']);
+  });
+
+  it('the collection route accepts a single project', async () => {
+    const app = buildApp(makeDeps());
+    await app.request('/api/timeline?projects=atlas');
+    expect(timelineCalls[0]!.slug).toEqual(['atlas']);
+  });
+
+  it('the collection route rejects an empty scope rather than dumping everything', async () => {
+    // Defaulting to "all projects" here would make a mis-typed query silently
+    // scan the entire index.
+    const app = buildApp(makeDeps());
+    const res = await app.request('/api/timeline');
+    expect(res.status).toBe(400);
+  });
+
+  it('items carry the project they came from, so a merged feed is readable', async () => {
+    const app = buildApp(makeDeps());
+    const res = await app.request('/api/timeline?projects=deepcast,atlas');
+    expect((await res.json()).items[0].projectSlug).toBe('deepcast');
+  });
+});
+
+describe('multi-project filters', () => {
+  it('search accepts a comma-separated project set', async () => {
+    const search = {
+      search: vi.fn(async (_q: string, _f: Record<string, unknown>) => ({
+        hits: [], mode: 'hybrid', degraded: false, tookMs: 1,
+      })),
+    };
+    const app = buildApp(makeDeps({ search: search as never }));
+    await app.request('/api/search?q=x&project=deepcast,atlas');
+
+    expect(search.search.mock.calls[0]![1]).toMatchObject({ projects: ['deepcast', 'atlas'] });
+  });
+
+  it('search keeps a lone project in the singular field, for back-compat', async () => {
+    const search = {
+      search: vi.fn(async (_q: string, _f: Record<string, unknown>) => ({
+        hits: [], mode: 'hybrid', degraded: false, tookMs: 1,
+      })),
+    };
+    const app = buildApp(makeDeps({ search: search as never }));
+    await app.request('/api/search?q=x&project=deepcast');
+
+    const filters = search.search.mock.calls[0]![1];
+    expect(filters.project).toBe('deepcast');
+    expect(filters.projects).toBeUndefined();
+  });
+
+  it('ask accepts a project array from the JSON body', async () => {
+    const ask = {
+      ask: vi.fn(async (_q: string, _f: Record<string, unknown>) => ({
+        answer: 'a', sources: [], model: 'm', degraded: false,
+      })),
+    };
+    const app = buildApp(makeDeps({ ask: ask as never }));
+    await app.request('/api/ask', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ question: 'q', project: ['deepcast', 'atlas'] }),
+    });
+
+    expect(ask.ask.mock.calls[0]![1]).toMatchObject({ projects: ['deepcast', 'atlas'] });
   });
 });

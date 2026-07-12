@@ -77,9 +77,14 @@ html {
   .caret { animation: none; }
 }
 
-/* Visible keyboard focus everywhere. */
+/* Visible keyboard focus everywhere.
+
+   Deliberately NOT the amber accent. Amber now carries a meaning — "Ask mode is
+   armed" — so using it for focus too made a focused Search box look like it was
+   in Ask mode. Focus says "you are here"; the accent says "this is generative".
+   Two signals, two treatments. */
 :focus-visible {
-  outline: 2px solid var(--color-kdb);
+  outline: 2px solid var(--color-claude);
   outline-offset: 1px;
   border-radius: 2px;
 }

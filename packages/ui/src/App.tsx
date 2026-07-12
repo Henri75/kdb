@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api';
 import type { ProjectRow, Stats } from './types';
 import { Sidebar, type View } from './components/Sidebar';
+import { ScopeBar } from './components/ScopeBar';
+import { useScope } from './useScope';
+import { usePersistentState } from './usePersistentState';
 import { DashboardView } from './views/DashboardView';
 import { SearchView } from './views/SearchView';
 import { TimelineView } from './views/TimelineView';
@@ -9,13 +12,32 @@ import { ComponentsView } from './views/ComponentsView';
 import { SessionsView } from './views/SessionsView';
 
 /**
- * Shell: sidebar (views + projects + status) and the active view.
- * Keyboard: '/' focuses search, 1–4 switch views, Esc backs out of a session.
+ * Shell. Two axes, deliberately kept apart:
+ *
+ *  - the **rail** picks the view — *how* you are looking;
+ *  - the **scope bar** picks the projects — *what* you are looking at.
+ *
+ * They used to share one column, which is what made the panel hard to read.
+ *
+ * Keyboard: '/' focuses search, 1–5 switch views, Esc backs out of a session.
  */
+
+/**
+ * Views split by how they use a project. Search, Ask and Timeline *filter* by it
+ * and take any number. Components and Sessions *browse* one — a component named
+ * `ui` in two projects is two different things — so they say so rather than
+ * silently showing one project's data under a two-project scope.
+ */
+const SINGLE_PROJECT_VIEWS: Record<string, string> = {
+  components: 'Components browses one project — pick one below',
+  sessions: 'Sessions browses one project — pick one below',
+};
+
 export default function App() {
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
-  const [project, setProject] = useState('');
+  const scope = useScope();
+  const [favorites, setFavorites] = usePersistentState<string[]>('atlas.projects.favorites', []);
   // The overview answers "is this healthy and what's in it?" — the question you
   // have on arriving. `/` still jumps straight to search.
   const [view, setView] = useState<View>('dashboard');
@@ -23,6 +45,14 @@ export default function App() {
   const [offline, setOffline] = useState(false);
   const [toast, setToast] = useState('');
   const searchRef = useRef<HTMLInputElement | null>(null);
+
+  const toggleFavorite = useCallback(
+    (slug: string) =>
+      setFavorites((prev) =>
+        prev.includes(slug) ? prev.filter((s) => s !== slug) : [...prev, slug],
+      ),
+    [setFavorites],
+  );
 
   const refresh = useCallback(() => {
     // "no projects" and "cannot reach the API" must not look the same — that
@@ -54,7 +84,7 @@ export default function App() {
         setTimeout(() => searchRef.current?.focus(), 0);
       } else if (!typing && ['1', '2', '3', '4', '5'].includes(e.key)) {
         setView(
-          (['dashboard', 'search', 'timeline', 'components', 'sessions'] as View[])[
+          (['search', 'dashboard', 'timeline', 'components', 'sessions'] as View[])[
             Number(e.key) - 1
           ]!,
         );
@@ -81,61 +111,78 @@ export default function App() {
     setTimeout(() => setToast(''), 5000);
   };
 
+  // Only warn when the scope genuinely conflicts with the view: a single-project
+  // browser under a 0- or 2+-project scope cannot honour it.
+  const scopeNote =
+    scope.project === null ? SINGLE_PROJECT_VIEWS[view] : undefined;
+
+  // The dashboard is global by definition; a scope bar over it would imply a
+  // filter it does not apply.
+  const showScope = view !== 'dashboard';
+
   return (
     <div className="flex min-h-screen">
       <Sidebar
-        projects={projects}
-        project={project}
         view={view}
         stats={stats}
-        onProject={setProject}
         onView={(v) => {
           setView(v);
           if (v !== 'sessions') setOpenSessionId('');
         }}
         onReindex={() => void reindex()}
       />
-      <main className="flex-1 px-6 py-6 min-w-0">
-        {offline && (
-          <div
-            role="alert"
-            className="mb-5 rounded-md border px-4 py-3 text-[13px]"
-            style={{
-              borderColor: 'color-mix(in srgb, var(--color-report) 45%, transparent)',
-              background: 'color-mix(in srgb, var(--color-report) 8%, transparent)',
-            }}
-          >
-            <span style={{ color: 'var(--color-report)' }}>Cannot reach the API.</span>{' '}
-            <span className="text-muted">
-              The stack may still be starting. Check <code className="font-mono">make ps</code> and{' '}
-              <code className="font-mono">make logs</code>.
-            </span>
-          </div>
-        )}
-        {view === 'dashboard' && <DashboardView onGoTo={setView} />}
-        {view === 'search' && (
-          <SearchView project={project} inputRef={searchRef} onOpenSession={openSession} />
-        )}
-        {view === 'timeline' && (
-          <TimelineView
-            project={project}
+      <main className="flex-1 min-w-0 flex flex-col">
+        {showScope && (
+          <ScopeBar
+            scope={scope}
             projects={projects}
-            onProject={setProject}
-            onOpenSession={openSession}
+            favorites={favorites}
+            onToggleFavorite={toggleFavorite}
+            note={scopeNote}
           />
         )}
-        {view === 'components' && (
-          <ComponentsView project={project} projects={projects} onProject={setProject} />
-        )}
-        {view === 'sessions' && (
-          <SessionsView
-            project={project}
-            projects={projects}
-            onProject={setProject}
-            openSessionId={openSessionId}
-            onOpenSession={openSession}
-          />
-        )}
+
+        <div className="flex-1 px-6 py-6 min-w-0">
+          {offline && (
+            <div
+              role="alert"
+              className="mb-5 rounded-md border px-4 py-3 text-[13px]"
+              style={{
+                borderColor: 'color-mix(in srgb, var(--color-report) 45%, transparent)',
+                background: 'color-mix(in srgb, var(--color-report) 8%, transparent)',
+              }}
+            >
+              <span style={{ color: 'var(--color-report)' }}>Cannot reach the API.</span>{' '}
+              <span className="text-muted">
+                The stack may still be starting. Check <code className="font-mono">make ps</code>{' '}
+                and <code className="font-mono">make logs</code>.
+              </span>
+            </div>
+          )}
+          {view === 'dashboard' && <DashboardView onGoTo={setView} />}
+          {view === 'search' && (
+            <SearchView scope={scope} inputRef={searchRef} onOpenSession={openSession} />
+          )}
+          {view === 'timeline' && (
+            <TimelineView scope={scope} projects={projects} onOpenSession={openSession} />
+          )}
+          {view === 'components' && (
+            <ComponentsView
+              project={scope.project}
+              projects={projects}
+              onProject={(slug) => scope.set([slug])}
+            />
+          )}
+          {view === 'sessions' && (
+            <SessionsView
+              project={scope.project}
+              projects={projects}
+              onProject={(slug) => scope.set([slug])}
+              openSessionId={openSessionId}
+              onOpenSession={openSession}
+            />
+          )}
+        </div>
       </main>
       {toast && (
         <div

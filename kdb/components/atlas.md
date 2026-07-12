@@ -415,3 +415,39 @@
 
 **Status:**
 - Completed
+---
+### [2026-07-13] - UI information architecture: scope bar, multi-project selection, Search/Ask mode switch
+
+**Objective:**
+- Fix five UI complaints that all trace to one root cause.
+
+**Summary of Work:**
+- **Root cause.** The UI mixed *modes* (how you look: search/ask/timeline) with *objects* (what you look at: which projects), stacking both in one column with identical treatment. That is why the selection was invisible, the scope line was easy to lose, and the rail read as arbitrary — three of the five complaints were the same bug seen from different seats.
+- **Layout.** The rail now holds views only. Scope became a persistent bar directly above the content it governs, because placement encodes authority: a filter above its results says "I govern everything below me"; one in a side rail reads as a peer of the navigation. With ~50 projects, a highlighted row scrolled out of the rail is invisible — a chip in the bar is always on screen.
+- **Multi-project.** Search, Ask and Timeline take any number of projects. Components and Sessions stay single-project browsers and *say so* under a 0- or 2+-project scope, because a component named `ui` in two projects is two different things and merging them would be a lie.
+- **Search vs Ask.** Twin submit buttons became a segmented mode switch on the input, which restyles (amber) when Ask is armed. Enter submits in both; the ⌘Enter secret handshake is gone.
+- Timeline gained a collection route; every row carries its project when the scope spans more than one.
+
+**Key Decisions & Rationale:**
+- **Multi-project reused the `sourceTypes` idiom rather than inventing one.** Both search paths already solved this exact problem for source filtering (qdrant `match:{any}`, FTS `= ANY($n)`), so the change is that idiom applied to a second field, with `selectedProjects()` resolving precedence once for both paths — they degrade into one another, and a filter that meant different things depending on which backend answered would be vicious to debug. No payload key, column or collection changed: **no reindex**.
+- **Timeline kept its per-project route and gained a collection route beside it.** `/api/projects/:slug/timeline` is a *resource*; `a,b` in a slug that means "one project" would be the same category error this rework exists to fix — and the CLI and MCP server both call that path.
+- **Ask's soft fallback was generalised, not merely handed a list.** With several projects selected, *any* hit means the scope worked; widening fires only when NONE of them match. Falling back on a partial match would have triggered on nearly every multi-project ask.
+- **One `useScope()` hook exposing two shapes** (`projects: string[]` and `project: string | null`, non-null only at exactly one) kept this from becoming a 39-call-site refactor: the per-project views keep their existing contract untouched.
+
+**Code/Files Modified:**
+- packages/core/src/types.ts (projects[], selectedProjects, ScopeFallback.requested → string[], TimelineItem.projectSlug)
+- packages/core/src/qdrant.ts, packages/core/src/catalog.ts, packages/core/src/ask.ts
+- packages/api/src/app.ts (parseProjects; GET /api/timeline)
+- packages/ui/src/useScope.ts (new), components/ScopeBar.tsx (new)
+- packages/ui/src/App.tsx, components/Sidebar.tsx, components/ui.tsx (ModeSwitch, ProjectTag)
+- packages/ui/src/views/SearchView.tsx, TimelineView.tsx, AskConversation.tsx
+- packages/ui/src/styles.css, api.ts, types.ts
+- docs/architecture.md, docs/api.md
+
+**Outcomes & Lessons Learned:**
+- **What Worked:** Reading the code before designing. `sourceTypes` had already solved multi-value filtering on both paths, which turned "add multi-project" from a risky change into a symmetric one-line generalisation per path. Auditing the tests while speccing showed the back-compat net was imaginary (the MCP suite only asserts the tool is *listed*; the CLI has no test), so the timeline signature was widened rather than changed and the missing coverage was written as part of the work.
+- **What Failed:** (1) The UI redeclared `ScopeFallback` inline instead of importing it, so it kept typechecking against a stale contract after core changed — now imported, so a future drift fails loudly. (2) The `:focus-visible` ring was amber, the same colour that now means "Ask mode is armed", so a focused Search box looked like Ask; focus moved to blue. Once a hue carries a meaning it cannot also be generic chrome. (3) A test mock that only knew `filters.project` reported a partial multi-project match as a full one and hid the very bug its test existed to catch.
+- Live-verified: search across deepcast+ezdeploy returns 30 hits from both, every row tagged, no out-of-scope leakage; the per-project timeline route still serves the CLI/MCP path. 372 → 417 tests.
+
+**Status:**
+- Completed

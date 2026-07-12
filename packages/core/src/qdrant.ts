@@ -1,5 +1,5 @@
 import { QdrantClient } from '@qdrant/js-client-rest';
-import type { SearchFilters } from './types.js';
+import { selectedProjects, type SearchFilters } from './types.js';
 import type { SparseVector } from './sparse.js';
 import { withRetry } from './retry.js';
 
@@ -52,7 +52,11 @@ export function buildQdrantFilter(
 ): { must: object[]; must_not?: object[] } | undefined {
   const must: object[] = [];
   const mustNot: object[] = [];
-  if (filters.project) must.push({ key: 'project', match: { value: filters.project } });
+  // Projects and source types take the same shape: one value is an equality
+  // match, several are an OR (`any`), none means no constraint at all.
+  const projects = selectedProjects(filters);
+  if (projects.length === 1) must.push({ key: 'project', match: { value: projects[0] } });
+  else if (projects.length > 1) must.push({ key: 'project', match: { any: projects } });
   // A subset (sourceTypes) wins over the single sourceType; the singular stays
   // for back-compat. Qdrant's `any` is the multi-value OR match.
   const types = filters.sourceTypes?.length

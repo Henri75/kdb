@@ -117,3 +117,11 @@
 
 **AI Response Summary:**
 > Probed the live G2P gateway while designing and found the UI attributed answers to the *requested* model rather than the one that served them, so the telemetry item became a correctness fix; also confirmed real token usage was on the wire. Shipped all ten items, root-caused both reported bugs (retry never reset `degraded`, and Tailwind's preflight zeroed `list-style`), and rejected jsPDF+html2canvas for jsPDF standalone after measuring. Browser verification caught two React memo bugs that were rebuilding the answer's DOM continuously and a stale-`dist` deploy that unit tests could never have seen. 372 tests green.
+---
+### [2026-07-13 00:30 UTC]
+
+**User Prompt Summary:**
+> Five UI/UX problems: the selected project is not visible enough in the left pane; allow selecting multiple projects with every feature still working; the scope indicator on the right is too subtle; the twin Search and Ask buttons are confusing; and the left panel mixing features on top with projects underneath is confusing — think deeply and apply best UI/UX practice.
+
+**AI Response Summary:**
+> Diagnosed all five as one root cause — the UI mixed *modes* (how you look) with *objects* (what you look at) and gave them identical treatment in one column — then mocked three full layouts in the real theme and built the chosen one: rail holds views only, a persistent scope bar with project chips sits above the content it governs, and Search/Ask became a segmented mode switch. Multi-project turned out cheap because `sourceTypes` had already solved multi-value filtering on both search paths; kept Components/Sessions as honest single-project browsers rather than letting a view lie about what it shows. Live-verified across two projects; 417 tests green.

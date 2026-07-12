@@ -3,6 +3,7 @@
 # Architecture
 
 ## Revision History
+- 2026-07-13 00:20 UTC — Multi-project scope (search/ask/timeline); UI information architecture: rail holds views, a persistent scope bar holds projects. See *Scoping by project*.
 - 2026-07-12 22:50 UTC — Answer telemetry: the served model (from the gateway's headers) replaces the configured one, plus token usage, TTFT and generation rate. See *Served model vs configured model*.
 - 2026-07-12 13:50 UTC — Renamed the product to **Atlas** (was KDBScope). See *Naming: Atlas vs KDB* below for what did and did not change.
 - 2026-07-11 04:35 UTC — Ask mode: soft project scope with all-projects fallback (`scopeFallback`); context reranking (doc boost + `claude_session` cap) so self-indexed chatter stops crowding out docs; multi-value `source` filter.
@@ -182,6 +183,45 @@ Two rules follow, and both are load-bearing:
 
 Token rate is computed over *generation* time (`total − ttft`), not wall-clock:
 dividing by total time would blame the model for a slow retrieval queue.
+
+## Scoping by project
+
+Project appears in two different roles, and conflating them is the mistake this
+design exists to avoid:
+
+| Role | Where | Multi? |
+|---|---|---|
+| **Filter** — narrows a result set | `/api/search`, `/api/ask`, `/api/timeline` | **yes** — *any of* these projects |
+| **Resource** — identifies the thing being browsed | `/api/projects/:slug/components`, `/sessions` | **no** |
+
+A component named `ui` in project A and `ui` in project B are *different things*.
+Merging them under one heading would be a lie, so Components and Sessions stay
+single-project browsers: with 0 or 2+ projects selected they say so and offer a
+chooser rather than silently showing one project's data.
+
+**The filter itself is the `sourceTypes` idiom applied to a second field.**
+`SearchFilters` carries both `project?: string` (kept for the CLI and MCP) and
+`projects?: string[]`, with the plural winning when non-empty. `selectedProjects()`
+resolves that precedence once and *both* search paths use it, because they degrade
+into one another and a filter that meant different things depending on which
+backend answered would be a vicious bug:
+
+- **Qdrant** — one project is `match: {value}`, several are `match: {any: [...]}`.
+- **Postgres FTS** — one is `p.slug = $n`, several are `p.slug = ANY($n)`.
+
+No payload key, column or collection changed, so **no reindex**.
+
+**Timeline has two routes on purpose.** `/api/projects/:slug/timeline` is the
+resource form and is what the CLI (`atlas timeline`) and the MCP server call —
+cramming `a,b` into a slug that means "one project" would be the same category
+error. `/api/timeline?projects=a,b` is the filter form, merges chronologically,
+and every item carries its own `projectSlug` so a merged feed stays readable.
+
+**Ask's soft fallback generalises rather than merely accepting a list.** With
+several projects selected, *any* hit means the scope worked — the projects that
+returned nothing simply had nothing to say. Widening to all projects fires only
+when **none** of the selected projects match; falling back on a partial match
+would trigger on nearly every multi-project ask.
 
 ## Doc staleness
 

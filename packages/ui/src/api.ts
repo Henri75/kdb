@@ -91,8 +91,18 @@ export const api = {
   ask: (body: Record<string, unknown>) => post<AskResult>('/api/ask', body),
   askStream,
   projects: () => get<ProjectRow[]>('/api/projects'),
-  timeline: (slug: string, params: Record<string, unknown> = {}) =>
-    get<{ items: TimelineItem[] }>(`/api/projects/${slug}/timeline${qs(params)}`),
+  /**
+   * The activity feed for one project or many, merged newest-first.
+   *
+   * Uses the collection route (`/api/timeline?projects=…`), not the per-project
+   * resource path — a slug means *one* project, and `a,b` in that position would
+   * be a category error. The per-project route still exists and is what the CLI
+   * and the MCP server call.
+   */
+  timeline: (slugs: string[], params: Record<string, unknown> = {}) =>
+    get<{ items: TimelineItem[] }>(
+      `/api/timeline${qs({ projects: slugs.join(','), ...params })}`,
+    ),
   components: (slug: string) =>
     get<{ components: ComponentRow[] }>(`/api/projects/${slug}/components`),
   componentHistory: (slug: string, name: string) =>

@@ -2,7 +2,7 @@ import type { AppConfig } from './config.js';
 import { chatComplete, chatStream, type ChatMessage, type StreamMeta } from './llm.js';
 import type { SearchService } from './search.js';
 import type { Catalog } from './catalog.js';
-import type { AskResult, AskSource, ScopeFallback, SearchFilters, SearchHit } from './types.js';
+import { selectedProjects, type AskResult, type AskSource, type ScopeFallback, type SearchFilters, type SearchHit } from './types.js';
 
 /**
  * Ask mode: retrieve → synthesize with citations. The LLM sees numbered
@@ -197,6 +197,13 @@ function bareModel(m: string): string {
   return m.split('/').pop()!.toLowerCase();
 }
 
+/** `[a]` → `project "a"`; `[a,b,c]` → `projects "a", "b" and "c"`. */
+export function namedProjects(slugs: string[]): string {
+  const q = slugs.map((s) => `"${s}"`);
+  if (q.length === 1) return `project ${q[0]}`;
+  return `projects ${q.slice(0, -1).join(', ')} and ${q.at(-1)}`;
+}
+
 interface Prepared {
   sources: AskSource[];
   messages: ChatMessage[] | null;
@@ -231,12 +238,20 @@ export class AskService {
     // window; the raw top-k is often all sessions.
     const pool = Math.min(Math.max(k * 3, 24), 60);
     const { hits } = await this.searchService.search(question, filters, pool);
+    // Any hit at all means the scope worked. With several projects selected, the
+    // ones that returned nothing simply had nothing to say — that is a *partial
+    // match*, not an empty scope, and widening it would be wrong. Only a total
+    // miss across every selected project is a scope problem.
     if (hits.length) return { hits: rerankForContext(hits, k) };
-    if (!filters.project) return { hits };
+
+    const requested = selectedProjects(filters);
+    if (!requested.length) return { hits };
 
     const { hits: wide } = await this.searchService.search(
       question,
-      { ...filters, project: undefined },
+      // BOTH must be cleared. Dropping only `project` would leave `projects`
+      // in place and the "widened" search would still be scoped — a silent no-op.
+      { ...filters, project: undefined, projects: undefined },
       pool,
     );
     // Only report a fallback if widening actually surfaced something; an
@@ -244,7 +259,7 @@ export class AskService {
     if (!wide.length) return { hits };
     return {
       hits: rerankForContext(wide, k),
-      scopeFallback: { requested: filters.project, usedAllProjects: true },
+      scopeFallback: { requested, usedAllProjects: true },
     };
   }
 
@@ -278,8 +293,10 @@ export class AskService {
     // When the scope was widened, tell the model so the answer opens by naming
     // the empty scope and where the answer actually came from — otherwise the
     // user never learns their scope was wrong.
+    // A scope can hold several projects, so name them all: "nothing matched in
+    // a,b" would read as one oddly-named project.
     const scopeNote = scopeFallback
-      ? `\n\nNote: nothing matched in project "${scopeFallback.requested}", so this ` +
+      ? `\n\nNote: nothing matched in ${namedProjects(scopeFallback.requested)}, so this ` +
         'searched all projects instead. Say so briefly at the start of your answer ' +
         'and name which project(s) the answer comes from.'
       : '';

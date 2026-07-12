@@ -3,6 +3,7 @@
 # REST API
 
 ## Revision History
+- 2026-07-13 00:20 UTC — Multi-project filtering: `project` accepts a comma-separated set on GET (`project=a,b`) and an array in a JSON body; `scopeFallback.requested` is now a list and widening fires only when *none* of the selected projects match. New collection route `GET /api/timeline?projects=a,b` merges feeds chronologically; the per-project route is unchanged. Timeline items carry `projectSlug`.
 - 2026-07-12 22:50 UTC — The SSE `done` event carries `metrics?`: the model that actually **served** the answer (from the gateway's `X-G2p-Reply-Model`, not the configured `LLM_MODEL`), provider-reported token counts, TTFT and generation rate. Absent on a degraded answer.
 - 2026-07-11 04:35 UTC — `source` accepts a comma-separated subset (`doc,kdb_component`); Ask retrieval reranks for source-type diversity; Ask returns `scopeFallback` (and the SSE `sources` event carries it) when a project scope was empty and widened to all projects.
 - 2026-07-10 22:24 UTC — `docStatus` filter on search/ask; hits carry `docStatus`/`ageMonths`; dashboard adds `sourceDetail`, `activity`, `runs`, `archivedDocs`.
@@ -18,8 +19,9 @@ Base: `http://127.0.0.1:8710`. JSON everywhere. No auth (localhost-only tool).
 | GET | `/api/health` | — | `{ok}` |
 | GET | `/api/stats` | — | counts, per-source breakdown, embedder, collection, lastRunAt, `queue`, `pending`, `backfill`, `recentErrors` |
 | GET | `/api/dashboard` | — | everything in `/api/stats` plus `sessions`, `storage`, `health`, `vectors`, `sourceDetail` (per-source entries/files/volume/last-indexed), `activity` (30-day per-day per-source counts), `runs`, `archivedDocs` |
-| GET | `/api/search` | `q` (required), `project`, `source` (one type or a comma-separated subset, e.g. `doc,kdb_component`; empty = all), `component`, `kind`, `since`, `until`, `docStatus` (`active` excludes archived docs, `archived` targets them), `limit` | `{hits[], mode, degraded, tookMs}`; each hit carries `hostPath` + `editorUrl`, and doc hits may carry `docStatus` (`archived` = downranked, `aging` = label only) + `ageMonths` |
-| POST | `/api/ask` | `{question, project?, source?` (string or string[]), `component?, kind?, docStatus?, k?, history?}` | `{answer, sources[], model, degraded, scopeFallback?}` — `scopeFallback: {requested, usedAllProjects}` when a project scope matched nothing and the search widened to all projects |
+| GET | `/api/search` | `q` (required), `project` (one slug, or a comma-separated set: `deepcast,atlas`), `source` (one type or a comma-separated subset, e.g. `doc,kdb_component`; empty = all), `component`, `kind`, `since`, `until`, `docStatus` (`active` excludes archived docs, `archived` targets them), `limit` | `{hits[], mode, degraded, tookMs}`; each hit carries `hostPath` + `editorUrl`, and doc hits may carry `docStatus` (`archived` = downranked, `aging` = label only) + `ageMonths` |
+| POST | `/api/ask` | `{question, project?` (string or string[]), `source?` (string or string[]), `component?, kind?, docStatus?, k?, history?}` | `{answer, sources[], model, degraded, scopeFallback?}` — `scopeFallback: {requested, usedAllProjects}` when a project scope matched nothing and the search widened to all projects |
+| GET | `/api/timeline` | `projects` (required, comma-separated), `limit`, `before`, `sources` | merged activity feed; each item carries `projectSlug` |
 | POST | `/api/ask/stream` | same as `/api/ask` | SSE: `sources` → `delta`* → `done`; `sources` carries `scopeFallback?`, `done` carries `metrics?` (served model, tokens, TTFT, tok/s) |
 | GET | `/api/projects` | — | projects with entry counts |
 | GET | `/api/projects/:slug/timeline` | `limit`, `before` (ISO cursor), `sources` (csv) | `{items[]}` newest first |

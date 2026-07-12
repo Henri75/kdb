@@ -87,3 +87,49 @@ describe('buildQdrantFilter docStatus', () => {
     });
   });
 });
+
+/**
+ * Projects filter exactly like source types: one is an equality, several are an
+ * OR, none is no constraint. The two must stay symmetric — they are the same
+ * idiom, and a reader should be able to trust that.
+ */
+describe('buildQdrantFilter projects', () => {
+  it('matches a single project by value', () => {
+    expect(buildQdrantFilter({ project: 'deepcast' })).toEqual({
+      must: [{ key: 'project', match: { value: 'deepcast' } }],
+    });
+  });
+
+  it('matches several projects with `any` (an OR, not an AND)', () => {
+    // An `all`/AND here would ask for entries belonging to both projects at
+    // once — an empty set, since an entry has exactly one project.
+    expect(buildQdrantFilter({ projects: ['deepcast', 'atlas'] })).toEqual({
+      must: [{ key: 'project', match: { any: ['deepcast', 'atlas'] } }],
+    });
+  });
+
+  it('collapses a one-item `projects` list to an equality match', () => {
+    expect(buildQdrantFilter({ projects: ['atlas'] })).toEqual({
+      must: [{ key: 'project', match: { value: 'atlas' } }],
+    });
+  });
+
+  it('lets the plural win over the singular, like sourceTypes does', () => {
+    expect(buildQdrantFilter({ project: 'ignored', projects: ['a', 'b'] })).toEqual({
+      must: [{ key: 'project', match: { any: ['a', 'b'] } }],
+    });
+  });
+
+  it('applies no project constraint when neither is given', () => {
+    expect(buildQdrantFilter({})).toBeUndefined();
+  });
+
+  it('combines a project set with a source-type set', () => {
+    expect(buildQdrantFilter({ projects: ['a', 'b'], sourceTypes: ['doc', 'git_commit'] })).toEqual({
+      must: [
+        { key: 'project', match: { any: ['a', 'b'] } },
+        { key: 'source_type', match: { any: ['doc', 'git_commit'] } },
+      ],
+    });
+  });
+});

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
-import type { AskMetrics, AskSource, SourceType } from '../types';
-import { Badge, CopyButton, Pulse, Stamp } from '../components/ui';
+import type { AskMetrics, AskSource, ScopeFallback, SourceType } from '../types';
+import { Badge, CopyButton, ProjectTag, Pulse, Stamp } from '../components/ui';
 import { Markdown } from '../components/Markdown';
 import { ExportButtons, type Exportable } from '../components/ExportReply';
 
@@ -21,8 +21,12 @@ export interface Turn {
   streaming?: boolean;
   error?: string;
   degraded?: boolean;
-  /** Set when the asked-for project was empty and the search widened to all. */
-  scopeFallback?: { requested: string; usedAllProjects: true };
+  /**
+   * Set when *every* asked-for project was empty and the search widened to all.
+   * Imported rather than redeclared: an inline copy of the shape here let the UI
+   * keep typechecking against a stale contract after core changed it.
+   */
+  scopeFallback?: ScopeFallback;
   /** What it cost to produce this reply. Absent when the LLM never answered. */
   metrics?: AskMetrics;
 }
@@ -52,7 +56,8 @@ function sourceRef(s: AskSource): string {
 }
 
 export function useAskConversation(
-  project: string,
+  /** The scoped projects. Empty means all — the API treats it as unconstrained. */
+  projects: string[],
   onOpenEntry: (id: number) => void,
   sources: SourceType[] = [],
 ) {
@@ -60,9 +65,14 @@ export function useAskConversation(
   const abortRef = useRef<AbortController | null>(null);
   const runRef = useRef(0);
   // Read at send time so the callbacks don't churn on every filter change and
-  // don't capture a stale source list.
+  // don't capture a stale source list. `projects` is an array — a new identity
+  // on every parent render — so depending on it directly would rebuild `run`
+  // (and every callback derived from it) constantly. Reading through a ref also
+  // means an in-flight answer keeps the scope it *started* with.
   const sourcesRef = useRef(sources);
   sourcesRef.current = sources;
+  const projectsRef = useRef(projects);
+  projectsRef.current = projects;
   // Mirrors `turns` so send/retry can read the current conversation without
   // doing side effects inside a state updater (which StrictMode runs twice).
   const turnsRef = useRef<Turn[]>([]);
@@ -97,7 +107,9 @@ export function useAskConversation(
         const stream = api.askStream(
           {
             question,
-            project: project || undefined,
+            // A list on the wire; omitted entirely when the scope is "all", so
+            // the API applies no project constraint at all.
+            project: projectsRef.current.length ? projectsRef.current : undefined,
             source: sourcesRef.current.length ? sourcesRef.current : undefined,
             history: history.map((t) => ({ role: t.role, content: t.content })),
           },
@@ -124,7 +136,10 @@ export function useAskConversation(
         if (runRef.current === myRun) patch(answerId, { streaming: false });
       }
     },
-    [project],
+    // Everything mutable is read through a ref at send time, so `run` is stable
+    // for the life of the hook. `patch`/`commit` are themselves stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [patch, commit],
   );
 
   const send = useCallback(
@@ -265,11 +280,14 @@ export function Conversation({
   onRetry,
   onDelete,
   onOpenEntry,
+  /** Tag each cited source with its project — only meaningful across a multi-scope. */
+  showProjects = false,
 }: {
   turns: Turn[];
   onRetry: (id: string) => void;
   onDelete: (id: string) => void;
   onOpenEntry: (entryId: number) => void;
+  showProjects?: boolean;
 }) {
   const citations = useCitationSets(turns);
   // Which [n] is being hovered, and where to float its card.
@@ -371,7 +389,8 @@ export function Conversation({
 
             {t.scopeFallback && (
               <p className="font-mono text-xs mt-2" style={{ color: 'var(--color-report)' }}>
-                ⓘ Nothing matched in <b>{t.scopeFallback.requested}</b> — searched all projects instead.
+                ⓘ Nothing matched in <b>{t.scopeFallback.requested.join(', ')}</b> — searched all
+                projects instead.
               </p>
             )}
 
@@ -395,6 +414,7 @@ export function Conversation({
                         [{s.n}]
                       </span>
                       <Badge source={s.sourceType} />
+                      {showProjects && <ProjectTag slug={s.projectSlug} />}
                       <span className="text-muted truncate">{s.title}</span>
                       <Stamp iso={s.occurredAt} />
                     </button>

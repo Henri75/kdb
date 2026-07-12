@@ -67,6 +67,23 @@ export function buildApp(deps: ApiDeps): Hono {
   };
 
   /**
+   * Parse `project`, which may be one slug or a comma-separated set
+   * ("deepcast,atlas") on GET, or a JSON array on POST. Deliberately the mirror
+   * image of parseSources: the two filters behave identically, so they should
+   * also *read* identically at every call site.
+   */
+  const parseProjects = (
+    raw?: string | string[],
+  ): { project?: string; projects?: string[] } => {
+    const list = (Array.isArray(raw) ? raw : (raw ?? '').split(','))
+      .map((s) => String(s).trim())
+      .filter(Boolean);
+    if (list.length === 0) return {};
+    if (list.length === 1) return { project: list[0] };
+    return { projects: list };
+  };
+
+  /**
    * Attach the host path and an editor link to anything carrying a source.
    * A row without a source path is returned untouched rather than failing the
    * whole request.
@@ -144,7 +161,7 @@ export function buildApp(deps: ApiDeps): Hono {
     const result = await deps.search.search(
       q,
       {
-        project: c.req.query('project') || undefined,
+        ...parseProjects(c.req.query('project')),
         ...parseSources(c.req.query('source')),
         component: c.req.query('component') || undefined,
         kind: (c.req.query('kind') as EntryKind) || undefined,
@@ -177,7 +194,7 @@ export function buildApp(deps: ApiDeps): Hono {
     if (!question) return c.json({ error: 'question is required' }, 400);
     const result = await deps.ask.ask(
       question,
-      { project: body.project, ...parseSources(body.source), component: body.component, kind: body.kind, docStatus: body.docStatus },
+      { ...parseProjects(body.project), ...parseSources(body.source), component: body.component, kind: body.kind, docStatus: body.docStatus },
       Math.min(Number(body.k ?? 12), 30),
       sanitizeHistory(body.history),
     );
@@ -197,7 +214,7 @@ export function buildApp(deps: ApiDeps): Hono {
 
     const events = deps.ask.askStream(
       question,
-      { project: body.project, ...parseSources(body.source), component: body.component, kind: body.kind, docStatus: body.docStatus },
+      { ...parseProjects(body.project), ...parseSources(body.source), component: body.component, kind: body.kind, docStatus: body.docStatus },
       Math.min(Number(body.k ?? 12), 30),
       sanitizeHistory(body.history),
     );
@@ -236,13 +253,32 @@ export function buildApp(deps: ApiDeps): Hono {
     );
   });
 
+  const timelineOpts = (c: { req: { query: (k: string) => string | undefined } }) => ({
+    limit: Number(c.req.query('limit') ?? 50),
+    before: c.req.query('before') || undefined,
+    sources: c.req.query('sources')?.split(',').filter(Boolean) as SourceType[] | undefined,
+  });
+
+  /**
+   * A project's feed, as a *resource*. Unchanged and load-bearing: both the CLI
+   * (`atlas timeline`) and the MCP server call this path. Multi-project belongs
+   * on the collection route below, not crammed into a slug that means "one".
+   */
   app.get('/api/projects/:slug/timeline', async (c) => {
-    const sources = c.req.query('sources')?.split(',').filter(Boolean) as SourceType[] | undefined;
-    const items = await deps.catalog.timeline(c.req.param('slug'), {
-      limit: Number(c.req.query('limit') ?? 50),
-      before: c.req.query('before') || undefined,
-      sources,
-    });
+    const items = await deps.catalog.timeline(c.req.param('slug'), timelineOpts(c));
+    return c.json({ items });
+  });
+
+  /**
+   * The feed as a *filter*: one project, several, or all. `projects=a,b` merges
+   * them chronologically; each item carries its own `projectSlug` so a merged
+   * feed can say where every row came from.
+   */
+  app.get('/api/timeline', async (c) => {
+    const { project, projects } = parseProjects(c.req.query('projects'));
+    const slugs = projects ?? (project ? [project] : []);
+    if (!slugs.length) return c.json({ error: 'projects is required' }, 400);
+    const items = await deps.catalog.timeline(slugs, timelineOpts(c));
     return c.json({ items });
   });
 
