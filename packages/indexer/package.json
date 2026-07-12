@@ -1,5 +1,5 @@
 {
-  "name": "@kdbscope/indexer",
+  "name": "@atlas/indexer",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -9,7 +9,7 @@
     "start": "node dist/main.js"
   },
   "dependencies": {
-    "@kdbscope/core": "*",
+    "@atlas/core": "*",
     "bullmq": "5.79.3",
     "ioredis": "5.10.1",
     "node-cron": "4.6.0"

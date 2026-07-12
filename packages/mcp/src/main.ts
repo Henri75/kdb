@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { getConfig } from '@kdbscope/core';
+import { getConfig } from '@atlas/core';
 import { TOOLS } from './tools.js';
 
 /**
@@ -13,7 +13,7 @@ import { TOOLS } from './tools.js';
 const cfg = getConfig();
 
 function buildMcpServer(): McpServer {
-  const server = new McpServer({ name: 'kdbscope', version: '0.1.0' });
+  const server = new McpServer({ name: 'atlas', version: '0.1.0' });
   for (const tool of TOOLS) {
     server.registerTool(
       tool.name,
@@ -49,7 +49,7 @@ async function readBody(req: import('node:http').IncomingMessage): Promise<unkno
 const httpServer = createServer(async (req, res) => {
   if (req.url === '/health') {
     res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ ok: true, service: 'kdbscope-mcp' }));
+    res.end(JSON.stringify({ ok: true, service: 'atlas-mcp' }));
     return;
   }
   if (!req.url?.startsWith('/mcp')) {

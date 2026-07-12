@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { editorUrl, lineFromSourceRef, toHostPath } from '@kdbscope/core';
+import { editorUrl, lineFromSourceRef, toHostPath } from '@atlas/core';
 import type {
   AskService,
   Catalog,
@@ -9,7 +9,7 @@ import type {
   SearchService,
   SourceType,
   StorageUsage,
-} from '@kdbscope/core';
+} from '@atlas/core';
 
 /**
  * REST surface. Dependencies are injected so route logic is unit-testable
@@ -77,7 +77,7 @@ export function buildApp(deps: ApiDeps): Hono {
     return { ...item, hostPath, editorUrl: editorUrl(hostPath, lineFromSourceRef(item.sourceRef)) };
   };
 
-  app.get('/api/health', (c) => c.json({ ok: true, service: 'kdbscope-api' }));
+  app.get('/api/health', (c) => c.json({ ok: true, service: 'atlas-api' }));
 
   app.get('/api/stats', async (c) => {
     const [stats, chunks, queue, backfillRaw] = await Promise.all([

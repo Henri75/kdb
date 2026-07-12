@@ -1,10 +1,10 @@
 {
-  "name": "@kdbscope/cli",
+  "name": "@atlas/cli",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "bin": {
-    "kdbs": "dist/main.js"
+    "atlas": "dist/main.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json"

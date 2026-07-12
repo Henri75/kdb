@@ -5,7 +5,7 @@ import {
   parseComponentLog,
   parseKdbStamp,
   parseSessionLog,
-} from '@kdbscope/core';
+} from '@atlas/core';
 
 const ctx = { projectSlug: 'deepcast', sourcePath: '/data/code/DeepCast/kdb/changelog.log' };
 

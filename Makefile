@@ -1,4 +1,4 @@
-# KDBScope — single entry point (§3.5).
+# Atlas — single entry point (§3.5).
 
 SHELL := /bin/bash
 COMPOSE := docker compose
@@ -50,9 +50,9 @@ reindex-full: ## reprocess everything from scratch
 smoke: ## poke health + search endpoints of a running stack
 	bash scripts/smoke.sh
 
-cli-link: ## make the `kdbs` command available on this machine
+cli-link: ## make the `atlas` command available on this machine
 	npm run build -w packages/cli && npm link --workspace packages/cli
-	@echo "try: kdbs status"
+	@echo "try: atlas status"
 
 kdb-rebuild: ## regenerate kdb/*.md views from kdb/*.log (never touches logs)
 	node bin/kdb_rebuild.mjs

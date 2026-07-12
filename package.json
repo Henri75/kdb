@@ -1,8 +1,8 @@
 {
-  "name": "kdbscope",
+  "name": "atlas",
   "version": "0.1.0",
   "private": true,
-  "description": "Cross-project knowledge indexer: kdb logs + Claude Code sessions + git + docs, searchable via UI/CLI/REST/MCP",
+  "description": "Atlas — cross-project knowledge indexer: kdb logs + Claude Code sessions + git + docs, searchable via UI/CLI/REST/MCP",
   "type": "module",
   "workspaces": [
     "packages/core",

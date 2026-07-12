@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fnv1a, sparseVector, tokenize } from '@kdbscope/core';
+import { fnv1a, sparseVector, tokenize } from '@atlas/core';
 
 describe('tokenize', () => {
   it('lowercases, drops stopwords and short tokens', () => {

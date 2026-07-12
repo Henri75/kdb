@@ -1,16 +1,22 @@
-# KDBScope
+# Atlas
 
 Cross-project knowledge indexer: everything that ever happened in your projects —
 per-project `kdb/` logs, Claude Code session transcripts, git history, docs/ADRs —
-indexed with hybrid vector search and served through a **web UI**, a **CLI (`kdbs`)**,
+indexed with hybrid vector search and served through a **web UI**, a **CLI (`atlas`)**,
 a **REST API**, and an **MCP server** any coding agent can call.
 
 Ask it things like *"what changed in DeepCast last week?"*, *"how does the VidSight
 service work?"*, *"what were the bug fixes in the video import microservice?"* — and
 get ranked, cited results or a synthesized LLM answer.
 
-KDBScope is a **read-only lens**: it never writes to your projects. The whole index
+Atlas is a **read-only lens**: it never writes to your projects. The whole index
 (Postgres + Qdrant) is a rebuildable cache.
+
+> **Atlas vs KDB.** *Atlas* is this tool. *KDB* is one of the four things it
+> indexes — the append-only `kdb/` logs each project keeps. So the `atlas` command
+> and the `atlas_*` MCP tools name the tool, while source types like
+> `kdb_changelog` name the data: `atlas search pgbouncer -s kdb_changelog`. The
+> `kdb_` prefix on those is deliberate, not a leftover.
 
 > **New here? Read [Getting Started](docs/getting-started.md).**
 > Full documentation lives in [`docs/`](docs/index.md).
@@ -22,12 +28,12 @@ brew install ollama && brew services start ollama   # strongly recommended
 make env        # creates .env from .env.example — review paths
 make up         # builds images, starts the 7-service stack
 open http://127.0.0.1:8712        # web UI
-make cli-link && kdbs status      # CLI
-claude mcp add --transport http kdbscope http://127.0.0.1:8711/mcp   # Claude Code
+make cli-link && atlas status      # CLI
+claude mcp add --transport http atlas http://127.0.0.1:8711/mcp   # Claude Code
 ```
 
 **Run Ollama.** The `auto` embedder prefers it and pulls `nomic-embed-text` on
-first boot; without it KDBScope falls back to a bundled CPU model that is several
+first boot; without it Atlas falls back to a bundled CPU model that is several
 times slower (it says so loudly in the logs). Ollama **≥ 0.13** is required —
 0.12.x segfaults inside its embeddings endpoint under sustained load.
 
@@ -39,7 +45,7 @@ bar while the rest fills in.
 ```
 ~/.claude  ──ro──►┌─────────┐   BullMQ    ┌────────┐
 __CODING NEW ─ro─►│ indexer │◄──(redis)──►│  api   │◄── ui (nginx :8712)
-                  └────┬────┘             └───┬────┘◄── kdbs CLI (host)
+                  └────┬────┘             └───┬────┘◄── atlas CLI (host)
                        │ embed+upsert         │      ◄── mcp :8711 (Claude Code)
                   ┌────▼────┐            ┌────▼─────┐
                   │ qdrant  │            │ postgres │

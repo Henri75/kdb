@@ -14,9 +14,9 @@ import {
   ollamaAvailable,
   parseRedisMemory,
   qdrantCollectionSizes,
-} from '@kdbscope/core';
-import type { StorageUsage } from '@kdbscope/core';
-import type { EmbeddingProvider } from '@kdbscope/core';
+} from '@atlas/core';
+import type { StorageUsage } from '@atlas/core';
+import type { EmbeddingProvider } from '@atlas/core';
 import { buildApp } from './app.js';
 
 /**

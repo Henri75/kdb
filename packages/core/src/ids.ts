@@ -11,6 +11,12 @@ import { createHash } from 'node:crypto';
  */
 export const ID_SCHEME = 'v2';
 
+/**
+ * The `kdbscope` here is the tool's former name (it is Atlas now) and is frozen
+ * on purpose: it is hashed into every id, so editing this string is exactly as
+ * destructive as bumping ID_SCHEME above — every dedup_key and Qdrant point id
+ * changes and the whole catalog must be rebuilt. It is a hash input, not a brand.
+ */
 const NAMESPACE = `kdbscope:${ID_SCHEME}`;
 
 /**

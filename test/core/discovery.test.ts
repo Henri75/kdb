@@ -4,7 +4,7 @@ import {
   encodeClaudePath,
   matchClaudeDirToProject,
   slugify,
-} from '@kdbscope/core';
+} from '@atlas/core';
 
 describe('encodeClaudePath', () => {
   it('matches Claude Code dir-name encoding (verified against real dirs)', () => {

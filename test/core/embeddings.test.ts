@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { collectionNameFor } from '@kdbscope/core';
+import { collectionNameFor } from '@atlas/core';
 import {
   compareVersions,
   ollamaHasModel,

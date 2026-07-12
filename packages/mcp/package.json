@@ -1,5 +1,5 @@
 {
-  "name": "@kdbscope/mcp",
+  "name": "@atlas/mcp",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -9,7 +9,7 @@
     "start": "node dist/main.js"
   },
   "dependencies": {
-    "@kdbscope/core": "*",
+    "@atlas/core": "*",
     "@modelcontextprotocol/sdk": "1.29.0",
     "zod": "4.4.3"
   }

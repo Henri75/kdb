@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseMarkdownDoc } from '@kdbscope/core';
+import { parseMarkdownDoc } from '@atlas/core';
 
 const ctx = {
   projectSlug: 'deepcast',

@@ -17,9 +17,9 @@ import {
   parseMarkdownDoc,
   parseSessionLog,
   sparseVector,
-} from '@kdbscope/core';
-import { withRetry } from '@kdbscope/core';
-import type { EmbeddingProvider, Entry, InsertedEntry } from '@kdbscope/core';
+} from '@atlas/core';
+import { withRetry } from '@atlas/core';
+import type { EmbeddingProvider, Entry, InsertedEntry } from '@atlas/core';
 import { listDocFiles, listKdbFiles, listSessionFiles } from './scanners.js';
 
 /**

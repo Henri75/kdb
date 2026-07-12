@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { contentHash, deterministicUuid } from '@kdbscope/core';
+import { contentHash, deterministicUuid } from '@atlas/core';
 
 describe('deterministicUuid', () => {
   it('is stable across calls, so re-indexing upserts instead of duplicating', () => {

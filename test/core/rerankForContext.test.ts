@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { rerankForContext } from '@kdbscope/core';
-import type { SearchHit } from '@kdbscope/core';
+import { rerankForContext } from '@atlas/core';
+import type { SearchHit } from '@atlas/core';
 
 /**
  * The regression these guard: a tool that indexes its own operators'

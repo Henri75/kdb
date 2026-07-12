@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SearchService } from '@kdbscope/core';
+import { SearchService } from '@atlas/core';
 
 /** Minimal fakes — we test the orchestration/degradation logic, not the stores. */
 

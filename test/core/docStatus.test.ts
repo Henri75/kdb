@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { deriveDocAge, isArchivedDocPath } from '@kdbscope/core';
+import { deriveDocAge, isArchivedDocPath } from '@atlas/core';
 
 describe('isArchivedDocPath', () => {
   it.each([

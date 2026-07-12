@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildQdrantFilter } from '@kdbscope/core';
+import { buildQdrantFilter } from '@atlas/core';
 
 /**
  * An over-broad filter silently returns the wrong rows; an over-narrow one

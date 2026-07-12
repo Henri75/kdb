@@ -3,6 +3,7 @@
 # Operations
 
 ## Revision History
+- 2026-07-12 13:50 UTC — Renamed the product to **Atlas**: the CLI is `atlas` (was `kdbs`), MCP tools are `atlas_*` (was `kdb_*`). Datastore identifiers (Postgres db/role, Qdrant collection prefix, queue and lock keys, the id namespace) still say `kdbscope` **on purpose** — they key existing data, and renaming them forces a full re-index. The Compose project name is pinned to `kdb` so the checkout can be renamed without orphaning the volumes.
 - 2026-07-09 12:20 UTC — ID scheme migration; scan jobs release their id on completion.
 - 2026-07-09 02:10 UTC — Backfill resume cursor; degraded-search banner behaviour.
 - 2026-07-09 01:50 UTC — Model-switch/backfill behaviour, Ollama ≥ 0.13 requirement, misleading-metric warnings, recentErrors.
@@ -18,14 +19,14 @@ make smoke            # 6 endpoint checks against the running stack
 ```
 
 Freshness: the indexer scans every `SCAN_INTERVAL_MIN` (default 5) minutes;
-"Reindex now" in the UI / `kdbs reindex` / `kdb_reindex` (MCP) trigger instantly.
+"Reindex now" in the UI / `atlas reindex` / `atlas_reindex` (MCP) trigger instantly.
 
 ## First index
 
 The boot tick enqueues one job per (project, source), and one job per Claude
 transcript directory. kdb/git/docs sources are small and finish first;
 transcripts (~10k files, indexed newest-first) take longest. Everything already
-indexed is searchable while the rest fills in. Progress: `kdbs status`, the UI
+indexed is searchable while the rest fills in. Progress: `atlas status`, the UI
 footer, or `/api/stats` (`pending`, `backfill`).
 
 ## Switching the embedding model
@@ -41,7 +42,7 @@ publishes `active_collection` when the new collection can serve. Search keeps
 running against the previous collection throughout.
 
 A rebuild of ~74k entries takes roughly 30–40 minutes on Ollama/Apple Silicon
-(~40 entries/s). `kdbs status` and the UI show progress and an ETA.
+(~40 entries/s). `atlas status` and the UI show progress and an ETA.
 
 The rebuild **resumes**: a cursor is persisted after every page, keyed by
 collection name, so restarting the indexer mid-rebuild continues where it left
@@ -51,17 +52,17 @@ rebuilds from scratch — its vectors have a different dimension.
 ## Troubleshooting
 
 - **`degraded: true` / mode `fts`** — Qdrant is unreachable, so search falls back
-  to Postgres text search (weaker ranking and recall). The UI and `kdbs search`
+  to Postgres text search (weaker ranking and recall). The UI and `atlas search`
   now say so in a banner. Check `docker logs kdb-qdrant-1`.
 - **mode `sparse-only`** — embedding provider unreachable (e.g. Ollama stopped).
   Keyword matching still works, but semantically similar wording is missed;
   hybrid resumes automatically when the provider is back.
 - **Search silently returns nothing useful after a model change** — the API
   follows `settings.active_collection` within 15s. If it lags, check that the
-  indexer finished its rebuild (`kdbs status` shows `re-embed`).
+  indexer finished its rebuild (`atlas status` shows `re-embed`).
 - **Ask returns sources but no answer** — LLM endpoint unreachable (G2P not
   running?). The response says so explicitly; sources are still returned.
-- **Index errors** — `GET /api/admin/errors`, or `kdbs status`, which reports
+- **Index errors** — `GET /api/admin/errors`, or `atlas status`, which reports
   errors *in the last hour* (a lifetime counter never resets and gets ignored).
   Errors are per-file; one corrupt transcript never fails a scan, and a failed
   backfill page is logged and skipped rather than abandoning the rebuild.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseGitLog } from '@kdbscope/core';
+import { parseGitLog } from '@atlas/core';
 
 const ctx = { projectSlug: 'deepcast', repoPath: '/data/code/DeepCast' };
 

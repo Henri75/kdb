@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { AskService } from '@kdbscope/core';
-import type { AskEvent } from '@kdbscope/core';
+import { AskService } from '@atlas/core';
+import type { AskEvent } from '@atlas/core';
 
 afterEach(() => vi.unstubAllGlobals());
 

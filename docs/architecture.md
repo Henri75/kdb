@@ -3,11 +3,44 @@
 # Architecture
 
 ## Revision History
+- 2026-07-12 13:50 UTC — Renamed the product to **Atlas** (was KDBScope). See *Naming: Atlas vs KDB* below for what did and did not change.
 - 2026-07-11 04:35 UTC — Ask mode: soft project scope with all-projects fallback (`scopeFallback`); context reranking (doc boost + `claude_session` cap) so self-indexed chatter stops crowding out docs; multi-value `source` filter.
 - 2026-07-10 22:24 UTC — Doc staleness: archived/aging model, query-time ranking, version-forced backfill.
 - 2026-07-09 22:25 UTC — Message kinds; distiller keeps all prose + records actions; EXTRACTION_SCHEME.
 - 2026-07-09 16:00 UTC — Host vs container paths; multi-root discovery; PROJECT_GROUPING.
 - 2026-07-09 01:20 UTC — Initial version.
+
+## Naming: Atlas vs KDB
+
+Two different things used to share the name "kdb", which made the codebase hard
+to talk about. They are now separated, and the separation is load-bearing:
+
+- **Atlas** is *this tool* — the indexer, API, MCP server, CLI and UI. Anything
+  that names the product is `atlas`: the npm workspace, the `@atlas/*` packages,
+  the `atlas` CLI command, the `atlas` MCP server and its ten `atlas_*` tools.
+- **KDB** is *one of the four things Atlas indexes* — the append-only knowledge
+  base of `changelog.log` / `session.log` / `components/*.log` files that each
+  project keeps under its own `kdb/` directory (see the root `CLAUDE.md` §2).
+  Anything that names **that data** keeps the `kdb` prefix, deliberately: the
+  source type `kdb`, the entry types `kdb_changelog`, `kdb_session`,
+  `kdb_component`, `kdb_backlog`, `kdb_report`, the `kdbLog` parser, this repo's
+  own `kdb/` directory, and the `bin/kdb_append` / `bin/kdb_rebuild` helpers.
+
+So `atlas search pgbouncer -s kdb_changelog` reads correctly: *ask Atlas to
+search KDB changelogs*. Renaming the `kdb_*` entry types to `atlas_*` would be
+wrong — they would then claim the content is about Atlas, when it is content
+Atlas merely reads.
+
+Some **internal datastore identifiers still say `kdbscope`** (the Postgres
+database and role, the Qdrant collection prefix `kdbscope_<provider>_<model>_<dim>`,
+the BullMQ queue `kdbscope-scan`, the Redis scheduler lock, the deterministic-id
+namespace in `ids.ts`, and the `KDBSCOPE_API_URL` env var). These are *not*
+cosmetic leftovers to tidy up: each one is the key under which existing data is
+stored. Changing the id namespace or the collection prefix invalidates every
+dedup key and Qdrant point id and forces a full re-index of ~280k entries. They
+were left alone on purpose. The Docker Compose project name is pinned to `kdb`
+in `docker-compose.yml` for the same reason — it fixes the volume prefix
+(`kdb_pg_data`, …) so the checkout directory can be renamed freely.
 
 ## Services
 
@@ -105,7 +138,7 @@ Retrieval → rerank → numbered context blocks → OpenAI-compatible
   feature under the "wrong" slug (G2P is indexed as `google-gemini-pool`, not
   `deepcast`) returned a confident "not found" instead of the answer that lived
   one project over. The prompt is told to open by naming the empty scope.
-- **Context reranking (`rerankForContext`).** Because KDBScope indexes its own
+- **Context reranking (`rerankForContext`).** Because Atlas indexes its own
   operators' conversations, a debugging transcript about "feature X" out-matches
   the doc that *explains* X — the transcript echoes the question verbatim, the
   doc uses different words. Left alone, Ask answers from chatter. So the pool is
@@ -117,7 +150,7 @@ Retrieval → rerank → numbered context blocks → OpenAI-compatible
 
 ## Doc staleness
 
-docs/ folders accumulate outdated material. KDBScope never excludes it — the
+docs/ folders accumulate outdated material. Atlas never excludes it — the
 index would silently lose recall — it classifies and lets ranking + labels do
 the judging (ADR: `docs/adr/20260710-docs-staleness-query-time.md`):
 
@@ -162,7 +195,7 @@ Two things depend on the host path, and both fail silently without it:
 ## Claude-dir ↔ project mapping
 
 Claude Code encodes a session's cwd as a directory name by replacing every char
-outside `[A-Za-z0-9-]` with `-`. That is lossy, so KDBScope never decodes: it
+outside `[A-Za-z0-9-]` with `-`. That is lossy, so Atlas never decodes: it
 encodes each discovered project's **hostPath** the same way and picks the
 deepest prefix match.
 

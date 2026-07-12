@@ -334,3 +334,39 @@
 
 **Status:**
 - Completed
+
+---
+### [2026-07-12] - Rename the product to Atlas (kdbscope -> atlas)
+
+**Objective:**
+- Stop the tool sharing a name with the data it indexes: "kdb" meant both this app and the append-only KDB logs it reads.
+
+**Summary of Work:**
+- Split one overloaded name into two. ATLAS = the tool (npm workspace, @atlas/* packages, `atlas` CLI, `atlas` MCP server + ten atlas_* tools, UI title, LLM system prompt, service ids atlas-api/atlas-mcp). KDB = one of the four indexed sources, and keeps its prefix everywhere: source type `kdb`, entry types kdb_changelog/kdb_session/kdb_component/kdb_backlog/kdb_report, kdbLog parser, this repo's kdb/ dir, bin/kdb_append, make kdb-rebuild.
+- Left every datastore identifier alone on purpose: pg db/role `kdbscope`, Qdrant prefix `kdbscope_<provider>_<model>_<dim>`, BullMQ `kdbscope-scan`, the scheduler lock, the ids.ts UUID namespace, KDBSCOPE_API_URL. Renaming any of them re-keys stored data and forces a full re-index of ~282k entries for zero user-visible gain.
+- Pinned `name: kdb` in docker-compose.yml. Compose derives the volume prefix from the directory name, so without the pin, renaming the checkout would make it look for atlas_pg_data, find nothing, and silently boot on an empty index. Pinned to `kdb` (not `atlas`) because that is what the existing volumes are already called.
+- Added two regression guards in test/mcp/tools.test.ts: every tool must be atlas_*, and SOURCE_TYPES must keep its kdb_ prefixes. Exported SOURCE_TYPES so the second one can pin the real enum.
+- Documented the split in architecture.md ("Naming: Atlas vs KDB"), configuration.md, README, and dated revision entries in mcp/cli/operations/configuration.
+
+**Key Decisions & Rationale:**
+- Rename the MCP tools kdb_* -> atlas_*, but NOT the kdb_* source types. Tools name the product; source types name the content. `atlas search pgbouncer -s kdb_changelog` reads correctly: ask Atlas to search KDB changelogs.
+- Keep the datastore names. The user explicitly chose "no reindex", and the collection prefix + id namespace are the keys ~282k entries are stored under.
+- Pin the Compose project name rather than renaming volumes: it makes the directory name irrelevant forever, at zero cost and zero risk.
+
+**Code/Files Modified:**
+- package.json, package-lock.json, packages/*/package.json (@kdbscope/* -> @atlas/*), tsconfig.lint.json, vitest.config.ts
+- packages/mcp/src/{tools.ts,main.ts} (ten atlas_* tools, server id `atlas`, SOURCE_TYPES exported)
+- packages/cli/{package.json,src/main.ts,src/api.ts} (bin kdbs -> atlas)
+- packages/api/src/app.ts, packages/core/src/ask.ts, packages/ui/{index.html,src/styles.css}
+- docker-compose.yml (name: kdb), .mcp.json, Makefile, .env.example, scripts/smoke.sh
+- README.md, docs/{architecture,configuration,operations,mcp,cli,getting-started,index}.md
+- test/mcp/tools.test.ts (+2 naming-boundary guards)
+
+**Outcomes & Lessons Learned:**
+- **What Worked:** Live-verified on the running stack: 282,333 entries / 312,355 chunks intact (no reindex), MCP advertises all ten atlas_* tools, `atlas search -s kdb_changelog` returns real hits, smoke 7/7, 336 tests + tsc green.
+- **What Failed:** A blind `sed s/kdb_/atlas_/` would have corrupted SOURCE_TYPES: `kdb_session` is BOTH an MCP tool and an entry type, 85 lines apart in tools.ts. Renaming the entry type is a SILENT failure — the API rejects the value and search just returns nothing. Caught by enumerating tool names explicitly instead of prefix-matching. A first pass of the doc sed also falsified history (revision-history lines and kdb/*.log entries claiming Atlas existed in July 9); restored from git and re-appended.
+- **What Failed (2):** The first version of the SOURCE_TYPES guard passed even with the bug injected — it asserted through request(), which just serialises whatever it is handed and never consults the enum. Rewrote it to pin the exported SOURCE_TYPES, then proved it by injecting the corruption and watching it fail.
+- **Lesson:** When one token means two things, exact-token replacement is the only safe transform, and a rename guard must be falsified (break it, watch it fail) before it can be trusted. Also: on macOS, BSD sed has no \b — `s/\bkdbs\b/` silently matches nothing and looks exactly like success.
+
+**Status:**
+- Completed

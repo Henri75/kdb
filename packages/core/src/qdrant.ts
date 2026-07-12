@@ -30,6 +30,13 @@ export interface VectorPoint {
   };
 }
 
+/**
+ * The `kdbscope_` prefix is the tool's former name and is deliberately frozen:
+ * it is the key the live collections are stored under. Renaming it to `atlas_`
+ * would point the indexer at a collection that does not exist — it would create
+ * an empty one and search would return nothing until a full re-embed of every
+ * entry. Cosmetic gain, hours of rebuild. Leave it.
+ */
 export function collectionNameFor(provider: string, model: string, dim: number): string {
   const safe = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '_');
   return `kdbscope_${safe(provider)}_${safe(model)}_${dim}`;

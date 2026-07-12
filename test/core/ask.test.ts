@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { buildAskPrompt } from '@kdbscope/core';
-import type { SearchHit } from '@kdbscope/core';
+import { buildAskPrompt } from '@atlas/core';
+import type { SearchHit } from '@atlas/core';
 
 const hits: SearchHit[] = [
   {

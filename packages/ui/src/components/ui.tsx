@@ -216,7 +216,7 @@ export function PickProject({
     return (
       <Empty
         title="No projects indexed yet."
-        hint="The first scan may still be running — check the footer, or run `kdbs status`."
+        hint="The first scan may still be running — check the footer, or run `atlas status`."
       />
     );
   }

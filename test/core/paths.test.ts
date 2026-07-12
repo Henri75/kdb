@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { editorUrl, lineFromSourceRef, mappingsFromConfig, toHostPath } from '@kdbscope/core';
-import { parseConfig } from '@kdbscope/core';
+import { editorUrl, lineFromSourceRef, mappingsFromConfig, toHostPath } from '@atlas/core';
+import { parseConfig } from '@atlas/core';
 
 const MAPPINGS = [
   { containerRoot: '/data/claude/projects', hostRoot: '/Users/nasta/.claude/projects' },

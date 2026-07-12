@@ -91,3 +91,12 @@
 
 **AI Response Summary:**
 > Documented the new behavior across api.md, mcp.md, architecture.md (new Ask-mode section) and cli.md with dated revision notes. Broadened tests: markdown XSS sanitization, MultiSelect + CopyButton, api parseSources (csv + array), ask source passthrough + scopeFallback capture (rerank + qdrant multi-value already covered). Suite 334/334, lint clean. Committing on a branch and pushing.
+
+---
+### [2026-07-12 13:55 UTC]
+
+**User Prompt Summary:**
+> Rename the app/service from kdb to Atlas everywhere (code, MCP, CLI, web UI), because it collided with the KDB text-log knowledge base this codebase indexes. Also: can the GitHub repo be renamed safely, and can the local folder be renamed later without breaking git/Claude history?
+
+**AI Response Summary:**
+> Found the app was actually named `kdbscope` (only the folder and GitHub repo were `kdb`), which gave a clean seam: renamed the product to Atlas (@atlas/* packages, `atlas` CLI, `atlas` MCP server + ten atlas_* tools, UI/API/LLM branding) while keeping `kdb` as the domain noun for the indexed logs (kdb_* entry types, kdb/ dir, kdb_append). Left all datastore identifiers as `kdbscope` per the user's no-reindex choice, and pinned `name: kdb` in compose so the checkout directory can be renamed without orphaning the volumes. Added two falsified naming-boundary guards. Verified live: 282,333 entries intact, smoke 7/7, 336 tests + tsc green.

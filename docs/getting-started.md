@@ -8,14 +8,14 @@
 - 2026-07-09 16:00 UTC — Multiple project roots; clarified that `make cli-link` is global and run once.
 - 2026-07-09 12:20 UTC — Initial version.
 
-Everything you need to start KDBScope, keep its index current, and actually use
+Everything you need to start Atlas, keep its index current, and actually use
 it from the browser, the terminal, and Claude Code.
 
 ---
 
 ## 1. Before you start
 
-**Install and run Ollama.** KDBScope embeds text locally; without Ollama it falls
+**Install and run Ollama.** Atlas embeds text locally; without Ollama it falls
 back to a bundled CPU model that is several times slower.
 
 ```bash
@@ -24,7 +24,7 @@ brew services start ollama     # launchd: survives reboots
 ollama --version               # must be >= 0.13 (0.12.x crashes on embeddings)
 ```
 
-You don't need to pull a model — KDBScope pulls `nomic-embed-text` on first boot.
+You don't need to pull a model — Atlas pulls `nomic-embed-text` on first boot.
 
 **Docker** must be running (OrbStack or Docker Desktop).
 
@@ -67,11 +67,11 @@ Watch progress in the UI footer, or:
 
 ```bash
 make cli-link      # run once, from this repo
-kdbs status
+atlas status
 ```
 
-`make cli-link` installs `kdbs` **globally** on your machine (an `npm link`), so
-you only run it once, from this directory. After that `kdbs` works from any
+`make cli-link` installs `atlas` **globally** on your machine (an `npm link`), so
+you only run it once, from this directory. After that `atlas` works from any
 folder — it is a thin client for the API and always searches everything the
 *server* indexes, regardless of where you happen to be standing.
 
@@ -113,25 +113,25 @@ Five views, switchable with keys `1`–`5`:
 
 If a banner says search is *degraded*, it names what broke and what it costs.
 
-### CLI — `kdbs`
+### CLI — `atlas`
 
 ```bash
-kdbs search qdrant timeout fix              # across everything
-kdbs search "video import" -p deepcast      # one project
-kdbs search pgbouncer -s kdb_changelog      # one source type
-kdbs search qdrant --kind insight           # only ★ Insight blocks
-kdbs search readme --kind summary           # only wrap-ups
+atlas search qdrant timeout fix              # across everything
+atlas search "video import" -p deepcast      # one project
+atlas search pgbouncer -s kdb_changelog      # one source type
+atlas search qdrant --kind insight           # only ★ Insight blocks
+atlas search readme --kind summary           # only wrap-ups
 
-kdbs ask "what were the bug fixes in the video import microservice?"
-kdbs ask "how does VidSight work?" -p deepcast
+atlas ask "what were the bug fixes in the video import microservice?"
+atlas ask "how does VidSight work?" -p deepcast
 
-kdbs projects                     # what's indexed
-kdbs timeline deepcast            # what happened, newest first
-kdbs components deepcast          # this project's components
-kdbs component deepcast analyzer-worker
-kdbs sessions deepcast
-kdbs session 0075adef             # replay one conversation
-kdbs status                       # counts, health, storage, freshness
+atlas projects                     # what's indexed
+atlas timeline deepcast            # what happened, newest first
+atlas components deepcast          # this project's components
+atlas component deepcast analyzer-worker
+atlas sessions deepcast
+atlas session 0075adef             # replay one conversation
+atlas status                       # counts, health, storage, freshness
 ```
 
 Add `--json` to any command for scripting. Ask streams to your terminal;
@@ -145,13 +145,13 @@ Source types for `-s`: `kdb_changelog`, `kdb_session`, `kdb_component`,
 Register once:
 
 ```bash
-claude mcp add --transport http kdbscope http://127.0.0.1:8711/mcp
+claude mcp add --transport http atlas http://127.0.0.1:8711/mcp
 ```
 
-Then just ask Claude things like *"use kdbscope to find how the qdrant retry
-logic evolved"*. It has ten tools; the useful flow is `kdb_search` → take an
-`entryId` → `kdb_entry` for the full record. `kdb_ask` gives a cited answer,
-`kdb_timeline` / `kdb_component_history` / `kdb_session` widen the context.
+Then just ask Claude things like *"use atlas to find how the qdrant retry
+logic evolved"*. It has ten tools; the useful flow is `atlas_search` → take an
+`entryId` → `atlas_entry` for the full record. `atlas_ask` gives a cited answer,
+`atlas_timeline` / `atlas_component_history` / `atlas_session` widen the context.
 
 This repo also ships `.mcp.json`, so a Claude Code session started **inside this
 directory** picks the server up with no setup.
@@ -167,9 +167,9 @@ for once).
 Force it when you don't want to wait:
 
 ```bash
-kdbs reindex                  # incremental, now
-kdbs reindex -p deepcast      # one project
-kdbs reindex --full           # forget what was scanned; re-parse everything
+atlas reindex                  # incremental, now
+atlas reindex -p deepcast      # one project
+atlas reindex --full           # forget what was scanned; re-parse everything
 ```
 
 Or click **Reindex now** in the UI footer, or `make reindex` / `make reindex-full`.
@@ -188,7 +188,7 @@ ready. Search keeps serving the old one throughout. A ~74k-entry rebuild takes
 roughly 40 minutes.
 
 The **previous collection stays on disk** — often more than a gigabyte. The
-Overview flags it as `STALE`, and `kdbs status` says so too. Nothing reads it.
+Overview flags it as `STALE`, and `atlas status` says so too. Nothing reads it.
 Reclaim the space by deleting that collection in Qdrant:
 
 ```bash
@@ -199,7 +199,7 @@ curl -X DELETE "http://127.0.0.1:6363/collections/<stale-collection-name>"
 
 ## 5. Indexing more than one project folder
 
-By default KDBScope indexes one tree: whatever `CODE_ROOT_HOST` points at
+By default Atlas indexes one tree: whatever `CODE_ROOT_HOST` points at
 (`__CODING NEW`). You can add up to **four more**. Uncomment a slot in `.env`:
 
 ```bash
@@ -221,7 +221,7 @@ project).
 
 **Why this matters for Claude Code sessions.** Claude Code names each
 transcript folder after the *host* path of the session's working directory. If
-that path isn't under one of your roots, KDBScope cannot tell which project the
+that path isn't under one of your roots, Atlas cannot tell which project the
 session belongs to, so it files it under a standalone project named after the
 path (`users-nasta-documents-coding-deepcast`). Add the folder as a root and
 those sessions merge into the real project on the next boot.
@@ -229,10 +229,10 @@ those sessions merge into the real project on the next boot.
 To see which of these you have:
 
 ```bash
-kdbs projects --json | jq -r '.[] | select(.rootPath=="") | .slug'
+atlas projects --json | jq -r '.[] | select(.rootPath=="") | .slug'
 ```
 
-Anything listed there is a transcript folder KDBScope has history for but no
+Anything listed there is a transcript folder Atlas has history for but no
 files. Adding its parent as a root will attach it to the right project.
 
 Changing the grouping rules rebuilds the derived index automatically (the
@@ -259,7 +259,7 @@ Edit `.env`, then `docker compose up -d` to apply.
 
 Everything binds to `127.0.0.1` and there is no authentication — this is a
 single-user local tool. Your project folders are mounted **read-only**;
-KDBScope cannot modify them.
+Atlas cannot modify them.
 
 ---
 
@@ -270,7 +270,7 @@ make up / make down          # start / stop (data volumes survive)
 make ps / make logs          # status / follow logs
 make smoke                   # is it healthy?
 make test / make lint        # 171 unit tests, typecheck
-kdbs status                  # index counts, freshness, recent errors
+atlas status                  # index counts, freshness, recent errors
 ```
 
 Reset the index completely (sources are untouched, everything re-parses):
@@ -288,10 +288,10 @@ docker compose down -v && make up
 | Search says **degraded** | The banner names the cause: embedding provider down (keyword-only) or Qdrant down (Postgres fallback). |
 | **Ask returns sources but no answer** | The LLM endpoint is unreachable. Is G2P running on `:8181`? |
 | **Indexing stalls, no logs, no CPU** | Almost always Ollama. Check `ollama --version` (needs ≥ 0.13) and `brew services list`. |
-| **`kdbs status` shows recent errors** | `curl -s localhost:8710/api/admin/errors \| jq` for detail. Errors are per-file; one bad file never stops a scan. |
-| **Results seem stale** | `kdbs reindex`, then watch `kdbs status`. |
+| **`atlas status` shows recent errors** | `curl -s localhost:8710/api/admin/errors \| jq` for detail. Errors are per-file; one bad file never stops a scan. |
+| **Results seem stale** | `atlas reindex`, then watch `atlas status`. |
 
-`kdbs status` reports errors **in the last hour** — that's the number that tells
+`atlas status` reports errors **in the last hour** — that's the number that tells
 you whether something is wrong *now*. The lifetime total is shown for context.
 
 Deeper troubleshooting, including the metrics that lie, is in

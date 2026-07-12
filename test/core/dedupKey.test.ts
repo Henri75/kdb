@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { Catalog } from '@kdbscope/core';
-import type { Entry } from '@kdbscope/core';
+import { Catalog } from '@atlas/core';
+import type { Entry } from '@atlas/core';
 
 const base: Entry = {
   projectSlug: 'deepcast',

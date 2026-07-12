@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { indexEntries } from '../../packages/indexer/src/pipeline.js';
-import type { Entry } from '@kdbscope/core';
+import type { Entry } from '@atlas/core';
 
 const entry = (id: number, body: string): { id: number; entry: Entry } => ({
   id,

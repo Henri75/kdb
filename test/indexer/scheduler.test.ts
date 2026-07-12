@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it, vi } from 'vitest';
-import { parseConfig } from '@kdbscope/core';
+import { parseConfig } from '@atlas/core';
 import { scanJobId, scheduleScans } from '../../packages/indexer/src/scheduler.js';
 
 /**

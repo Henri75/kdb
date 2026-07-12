@@ -18,13 +18,13 @@ import {
 } from './format.js';
 
 /**
- * kdbs — terminal client for KDBScope. Every command supports --json for
+ * atlas — terminal client for Atlas. Every command supports --json for
  * scripting/agents; human output is compact and scannable.
  */
 
 const program = new Command()
-  .name('kdbs')
-  .description('KDBScope: search & ask across all your projects’ history')
+  .name('atlas')
+  .description('Atlas: search & ask across all your projects’ history')
   .version('0.1.0')
   .option('--json', 'raw JSON output');
 

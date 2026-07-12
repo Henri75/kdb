@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Smoke test for a running KDBScope stack: health, stats, search, mcp.
+# Smoke test for a running Atlas stack: health, stats, search, mcp.
 set -euo pipefail
 
 API="http://127.0.0.1:${API_PORT:-8710}"

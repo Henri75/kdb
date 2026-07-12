@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { distillClaudeJsonl } from '@kdbscope/core';
+import { distillClaudeJsonl } from '@atlas/core';
 
 const ctx = {
   projectSlug: 'deepcast',

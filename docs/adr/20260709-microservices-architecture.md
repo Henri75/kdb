@@ -1,11 +1,11 @@
-# ADR: Microservices split with Postgres catalog for KDBScope
+# ADR: Microservices split with Postgres catalog for Atlas
 Date: 2026-07-09
 
 ## Status
 Accepted
 
 ## Context
-KDBScope indexes ~11 GB of Claude Code transcripts, 20 kdb/ folders, 28 git
+Atlas indexes ~11 GB of Claude Code transcripts, 20 kdb/ folders, 28 git
 repos and project docs, and serves search/ask through UI, CLI, REST and MCP.
 The owner explicitly chose an everything-in-Docker deployment and a
 microservices topology (scalability was a stated requirement), over a

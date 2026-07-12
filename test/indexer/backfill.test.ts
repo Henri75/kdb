@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { HttpError } from '@kdbscope/core';
+import { HttpError } from '@atlas/core';
 import { backfillVectors, needsBackfill } from '../../packages/indexer/src/pipeline.js';
 
 /**

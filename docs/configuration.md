@@ -3,6 +3,7 @@
 # Configuration
 
 ## Revision History
+- 2026-07-12 13:50 UTC — Product renamed to **Atlas**; documented why the `KDBSCOPE_*` / `kdbscope` identifiers survive the rename.
 - 2026-07-10 22:24 UTC — Doc staleness knobs: `KDB_DOCS_AGING_MONTHS`, `KDB_ARCHIVED_PENALTY`.
 - 2026-07-10 00:00 UTC — QDRANT_STORAGE_PATH for dashboard disk usage.
 - 2026-07-09 16:00 UTC — Multiple project roots; why host paths are passed into the containers.
@@ -12,6 +13,20 @@
 All configuration is environment-driven through the central module
 `packages/core/src/config.ts` (§3.1: no inline constants anywhere).
 Compose reads `.env` (create with `make env`).
+
+### A note on the `kdbscope` / `KDB_` names you will see here
+
+The product is **Atlas**, but several settings still say `kdbscope`, and others
+say `KDB_`. Both are intentional; do not "tidy" them.
+
+- `KDBSCOPE_API_URL`, the Postgres db/role `kdbscope`, and the Qdrant collection
+  prefix `kdbscope_*` are **legacy datastore identifiers**. They are the keys the
+  existing index is stored under. Renaming the collection prefix or the id
+  namespace invalidates every dedup key and Qdrant point id and forces a full
+  re-index of ~280k entries, so they were deliberately left as-is.
+- `KDB_DOCS_AGING_MONTHS` / `KDB_ARCHIVED_PENALTY` refer to **KDB**, the
+  append-only knowledge base Atlas indexes — a different thing from Atlas itself.
+  See *Naming: Atlas vs KDB* in [architecture.md](architecture.md).
 
 ## Host paths
 

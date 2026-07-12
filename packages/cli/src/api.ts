@@ -1,4 +1,4 @@
-/** REST client for the kdbs CLI. Base URL via KDBSCOPE_API_URL. */
+/** REST client for the atlas CLI. Base URL via KDBSCOPE_API_URL. */
 
 export function apiBase(): string {
   return (process.env.KDBSCOPE_API_URL ?? 'http://127.0.0.1:8710').replace(/\/$/, '');

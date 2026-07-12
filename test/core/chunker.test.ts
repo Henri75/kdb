@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chunk } from '@kdbscope/core';
+import { chunk } from '@atlas/core';
 
 describe('chunk', () => {
   it('returns single chunk for short text', () => {

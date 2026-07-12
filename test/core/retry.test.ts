@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { HttpError, isTransient, withRetry } from '@kdbscope/core';
+import { HttpError, isTransient, withRetry } from '@atlas/core';
 
 const noSleep = async () => {};
 

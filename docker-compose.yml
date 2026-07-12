@@ -1,5 +1,14 @@
-# KDBScope stack. Copy .env.example to .env first (make env).
+# Atlas stack. Copy .env.example to .env first (make env).
 # All host ports bind to 127.0.0.1 — this is a single-user local tool.
+
+# Pinned so the volume prefix stops depending on the directory name. Compose
+# derives the project name from the folder unless told otherwise, which means
+# renaming the checkout would make it look for `<newname>_pg_data`, find
+# nothing, and silently start on an empty index. The value stays `kdb` because
+# that is the prefix the existing volumes already carry (kdb_pg_data,
+# kdb_qdrant_data, …); changing it to `atlas` would orphan them and force a
+# full reindex. It is an internal Docker namespace — the product is Atlas.
+name: kdb
 
 x-node-common: &node-common
   restart: unless-stopped

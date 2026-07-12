@@ -1,7 +1,7 @@
 import { readdirSync, statSync, existsSync } from 'node:fs';
 import { join, basename } from 'node:path';
-import type { DiscoveredProject, SourceType } from '@kdbscope/core';
-import { isArchivedDocPath, slugify } from '@kdbscope/core';
+import type { DiscoveredProject, SourceType } from '@atlas/core';
+import { isArchivedDocPath, slugify } from '@atlas/core';
 
 /**
  * Filesystem discovery. Everything here is read-only and defensive: a

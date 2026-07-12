@@ -28,16 +28,22 @@ const jsonPost = (body: unknown): RequestInit => ({
   body: JSON.stringify(body),
 });
 
-const SOURCE_TYPES = [
+/**
+ * Kinds of indexed *content*, not names of this tool. The `kdb_` prefix marks
+ * entries parsed out of a project's append-only KDB logs; renaming them to
+ * `atlas_*` would be wrong (and would silently match nothing, since the API
+ * validates against these exact strings). Exported so a test can pin them.
+ */
+export const SOURCE_TYPES = [
   'kdb_changelog', 'kdb_session', 'kdb_component', 'kdb_backlog',
   'kdb_report', 'claude_session', 'git_commit', 'doc',
 ] as const;
 
 export const TOOLS: ToolDef[] = [
   {
-    name: 'kdb_search',
+    name: 'atlas_search',
     description:
-      'Hybrid semantic+keyword search across all indexed projects: kdb logs, Claude Code sessions, git commits, docs. Returns ranked snippets, each with an entryId (pass to kdb_entry for the full text) and a hostPath. Docs under archive-style paths are downranked and labeled docStatus=archived (aging = old but active); treat those hits as historical context, not current truth.',
+      'Hybrid semantic+keyword search across all indexed projects: kdb logs, Claude Code sessions, git commits, docs. Returns ranked snippets, each with an entryId (pass to atlas_entry for the full text) and a hostPath. Docs under archive-style paths are downranked and labeled docStatus=archived (aging = old but active); treat those hits as historical context, not current truth.',
     schema: {
       query: z.string().describe('Natural-language or keyword query'),
       project: z.string().optional().describe('Project slug filter, e.g. "deepcast"'),
@@ -60,7 +66,7 @@ export const TOOLS: ToolDef[] = [
     }),
   },
   {
-    name: 'kdb_ask',
+    name: 'atlas_ask',
     description:
       'Ask a question about what happened across projects ("what were the bug fixes in the video import microservice?"). Retrieves relevant history and synthesizes a cited answer with an LLM. Prefer leaving `project` unset: a feature may be indexed under a different slug than you expect (e.g. G2P lives under "google-gemini-pool", not "deepcast"), and a wrong scope is the main reason a real answer looks missing. When `project` is set but nothing matches there, the search widens to all projects and the response carries a `scopeFallback` marker naming the scope that was empty.',
     schema: {
@@ -74,13 +80,13 @@ export const TOOLS: ToolDef[] = [
     request: (a) => ({ path: '/api/ask', init: jsonPost(a) }),
   },
   {
-    name: 'kdb_projects',
+    name: 'atlas_projects',
     description: 'List all indexed projects with entry counts.',
     schema: {},
     request: () => ({ path: '/api/projects' }),
   },
   {
-    name: 'kdb_timeline',
+    name: 'atlas_timeline',
     description: 'Chronological activity feed for a project: changelog entries, sessions, commits, merged and sorted (newest first).',
     schema: {
       project: z.string(),
@@ -93,13 +99,13 @@ export const TOOLS: ToolDef[] = [
     }),
   },
   {
-    name: 'kdb_components',
+    name: 'atlas_components',
     description: 'List a project’s components (from kdb component logs) with activity counts.',
     schema: { project: z.string() },
     request: (a) => ({ path: `/api/projects/${encodeURIComponent(a.project)}/components` }),
   },
   {
-    name: 'kdb_component_history',
+    name: 'atlas_component_history',
     description: 'Full recorded history of one component: objectives, decisions, outcomes, bug fixes.',
     schema: { project: z.string(), component: z.string() },
     request: (a) => ({
@@ -107,20 +113,20 @@ export const TOOLS: ToolDef[] = [
     }),
   },
   {
-    name: 'kdb_entry',
+    name: 'atlas_entry',
     description:
-      'Read one indexed entry in full. Search returns short snippets; this returns the entire recorded body plus the source file path (hostPath) and an editor link. Use it after kdb_search or kdb_ask to read a result properly.',
+      'Read one indexed entry in full. Search returns short snippets; this returns the entire recorded body plus the source file path (hostPath) and an editor link. Use it after atlas_search or atlas_ask to read a result properly.',
     schema: { entry_id: z.number().int().describe('entryId from a search hit or ask source') },
     request: (a) => ({ path: `/api/entries/${encodeURIComponent(String(a.entry_id))}` }),
   },
   {
-    name: 'kdb_session',
+    name: 'atlas_session',
     description: 'Reconstruct one Claude Code session: prompts, substantial responses, files touched.',
     schema: { session_id: z.string() },
     request: (a) => ({ path: `/api/sessions/${encodeURIComponent(a.session_id)}` }),
   },
   {
-    name: 'kdb_reindex',
+    name: 'atlas_reindex',
     description: 'Trigger an incremental (or full) reindex, optionally scoped to one project.',
     schema: {
       project: z.string().optional(),
@@ -129,7 +135,7 @@ export const TOOLS: ToolDef[] = [
     request: (a) => ({ path: '/api/admin/reindex', init: jsonPost(a) }),
   },
   {
-    name: 'kdb_status',
+    name: 'atlas_status',
     description: 'Index health: project/entry/chunk counts, per-source breakdown, last run time, recent errors count.',
     schema: {},
     request: () => ({ path: '/api/stats' }),

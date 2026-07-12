@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it, vi } from 'vitest';
-import { DOCS_PARSER_VERSION } from '@kdbscope/core';
+import { DOCS_PARSER_VERSION } from '@atlas/core';
 import { processScanJob } from '../../packages/indexer/src/pipeline.js';
 
 /**

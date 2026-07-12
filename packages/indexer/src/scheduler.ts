@@ -1,7 +1,7 @@
 import { Queue } from 'bullmq';
 import type { Redis } from 'ioredis';
-import { Catalog, encodeClaudePath, matchClaudeDirToProject, claudeDirFallbackSlug } from '@kdbscope/core';
-import type { AppConfig, DiscoveredProject } from '@kdbscope/core';
+import { Catalog, encodeClaudePath, matchClaudeDirToProject, claudeDirFallbackSlug } from '@atlas/core';
+import type { AppConfig, DiscoveredProject } from '@atlas/core';
 import { readdirSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { discoverProjects, hasGitRepo } from './scanners.js';

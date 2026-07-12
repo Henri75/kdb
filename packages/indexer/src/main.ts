@@ -10,7 +10,7 @@ import {
   collectionNameFor,
   createEmbedder,
   getConfig,
-} from '@kdbscope/core';
+} from '@atlas/core';
 import {
   backfillVectors,
   needsBackfill,

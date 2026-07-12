@@ -7,7 +7,7 @@
 @import '@fontsource/ibm-plex-mono/500.css';
 @import 'tailwindcss';
 
-/* KDBScope token system — color is data: each source type owns a hue. */
+/* Atlas token system — color is data: each source type owns a hue. */
 @theme {
   --color-bg: #0e1116;
   --color-panel: #161b22;

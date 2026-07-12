@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseConfig } from '@kdbscope/core';
+import { parseConfig } from '@atlas/core';
 
 describe('parseConfig', () => {
   it('applies defaults for an empty env', () => {
