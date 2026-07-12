@@ -42,4 +42,39 @@ describe('createSseParser', () => {
       `data: ${JSON.stringify({ choices: [{ delta: { content: 'b' } }] })}\n\n`;
     expect(parse(rec)).toEqual(['a', 'b']);
   });
+
+  /**
+   * The usage frame is the odd one out: it carries `choices: []`, so it yields
+   * no content and would be dropped entirely by a content-only read. It only
+   * arrives when the request opts in via stream_options.include_usage.
+   */
+  describe('usage capture', () => {
+    const usageFrame =
+      `data: ${JSON.stringify({
+        choices: [],
+        usage: { prompt_tokens: 11, completion_tokens: 19, total_tokens: 30 },
+      })}\n\n`;
+
+    it('captures the usage frame without emitting it as a delta', () => {
+      const seen: unknown[] = [];
+      const parse = createSseParser((u) => seen.push(u));
+
+      expect(parse(frame('hi') + usageFrame)).toEqual(['hi']);
+      expect(seen).toEqual([{ promptTokens: 11, completionTokens: 19, totalTokens: 30 }]);
+    });
+
+    it('does not invoke the sink when no usage frame arrives', () => {
+      const seen: unknown[] = [];
+      const parse = createSseParser((u) => seen.push(u));
+
+      parse(frame('hi') + 'data: [DONE]\n\n');
+      expect(seen).toEqual([]);
+    });
+
+    it('parses content deltas the same whether or not a sink is passed', () => {
+      // The sink is additive: it must not change what the parser returns.
+      expect(createSseParser()(frame('x'))).toEqual(['x']);
+      expect(createSseParser(() => {})(frame('x'))).toEqual(['x']);
+    });
+  });
 });

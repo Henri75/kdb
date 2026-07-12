@@ -3,6 +3,7 @@
 # REST API
 
 ## Revision History
+- 2026-07-12 22:50 UTC — The SSE `done` event carries `metrics?`: the model that actually **served** the answer (from the gateway's `X-G2p-Reply-Model`, not the configured `LLM_MODEL`), provider-reported token counts, TTFT and generation rate. Absent on a degraded answer.
 - 2026-07-11 04:35 UTC — `source` accepts a comma-separated subset (`doc,kdb_component`); Ask retrieval reranks for source-type diversity; Ask returns `scopeFallback` (and the SSE `sources` event carries it) when a project scope was empty and widened to all projects.
 - 2026-07-10 22:24 UTC — `docStatus` filter on search/ask; hits carry `docStatus`/`ageMonths`; dashboard adds `sourceDetail`, `activity`, `runs`, `archivedDocs`.
 - 2026-07-10 00:00 UTC — /api/dashboard: storage, service health, vector stats.
@@ -19,7 +20,7 @@ Base: `http://127.0.0.1:8710`. JSON everywhere. No auth (localhost-only tool).
 | GET | `/api/dashboard` | — | everything in `/api/stats` plus `sessions`, `storage`, `health`, `vectors`, `sourceDetail` (per-source entries/files/volume/last-indexed), `activity` (30-day per-day per-source counts), `runs`, `archivedDocs` |
 | GET | `/api/search` | `q` (required), `project`, `source` (one type or a comma-separated subset, e.g. `doc,kdb_component`; empty = all), `component`, `kind`, `since`, `until`, `docStatus` (`active` excludes archived docs, `archived` targets them), `limit` | `{hits[], mode, degraded, tookMs}`; each hit carries `hostPath` + `editorUrl`, and doc hits may carry `docStatus` (`archived` = downranked, `aging` = label only) + `ageMonths` |
 | POST | `/api/ask` | `{question, project?, source?` (string or string[]), `component?, kind?, docStatus?, k?, history?}` | `{answer, sources[], model, degraded, scopeFallback?}` — `scopeFallback: {requested, usedAllProjects}` when a project scope matched nothing and the search widened to all projects |
-| POST | `/api/ask/stream` | same as `/api/ask` | SSE: `sources` → `delta`* → `done`; the `sources` event carries `scopeFallback?` |
+| POST | `/api/ask/stream` | same as `/api/ask` | SSE: `sources` → `delta`* → `done`; `sources` carries `scopeFallback?`, `done` carries `metrics?` (served model, tokens, TTFT, tok/s) |
 | GET | `/api/projects` | — | projects with entry counts |
 | GET | `/api/projects/:slug/timeline` | `limit`, `before` (ISO cursor), `sources` (csv) | `{items[]}` newest first |
 | GET | `/api/projects/:slug/components` | — | `{components[]}` |
@@ -102,11 +103,38 @@ crowded out by transcripts that merely echo the question. See
 |---|---|---|
 | `sources` | `{sources: [...], scopeFallback?}` | retrieved context; emitted before any prose. `scopeFallback: {requested, usedAllProjects}` appears when a project scope was empty and the search widened to all projects |
 | `delta` | `{text: "…"}` | append to the answer |
-| `done` | `{model, degraded}` | terminal; `degraded` if the LLM failed |
+| `done` | `{model, degraded, metrics?}` | terminal; `degraded` if the LLM failed |
 
 The stream always terminates with `done`, even when the LLM is unreachable — in
 that case a `delta` explains it and the sources still stand. Interactive streams
 do **not** retry: a fast degraded answer beats seconds of silent backoff.
+
+### Answer metrics
+
+`done.metrics` reports what actually produced the answer. It is **absent** when
+the LLM never responded (a degraded answer has no headers and no token usage);
+consumers must render nothing rather than substitute zeroes.
+
+| Field | Meaning |
+|---|---|
+| `model` | the model that **served** the answer, from the gateway's `X-G2p-Reply-Model` header — not the one `LLM_MODEL` requested |
+| `substituted` | `true` when the served model differs from the configured one (vendor prefixes are ignored: `google/gemma-4-31b-it` matches `gemma-4-31b-it`) |
+| `promptTokens`, `completionTokens`, `totalTokens` | provider-reported counts, never estimated. Absent unless the provider sends a usage frame |
+| `ttftMs` | milliseconds to the first content token, measured API-side (so it excludes browser latency) |
+| `totalMs` | wall-clock for the whole completion |
+| `tokensPerSec` | `completionTokens / (totalMs − ttftMs)` — generation rate, excluding the initial wait, so a slow queue is not reported as a slow model. Omitted when it cannot be computed |
+| `attempts` | gateway-side attempts (`X-G2p-Reply-Attempts`). `> 1` means it failed over internally before succeeding |
+| `requestId` | `X-Request-Id`, for correlating an answer with the gateway's own logs |
+
+**A routing gateway substitutes models by design.** G2P picks by policy, so
+`LLM_MODEL` is a *request*, not a guarantee: asking for `gemini-2.5-flash` may
+legitimately be answered by `gemma-4-31b-it`. Reporting the configured name would
+attribute an answer to a model that never saw the question, so the served model
+is authoritative everywhere it is shown.
+
+Token counts require the provider to honour `stream_options: {include_usage:
+true}`, which the client always sends. Providers that ignore it simply yield no
+counts; the model, TTFT and attempts still report.
 
 nginx must not buffer this route (`proxy_buffering off` plus the
 `x-accel-buffering: no` response header), or the whole answer arrives at once.

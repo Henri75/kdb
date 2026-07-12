@@ -1,4 +1,5 @@
 import type {
+  AskMetrics,
   AskResult,
   ComponentRow,
   Dashboard,
@@ -40,7 +41,8 @@ export function qs(params: Record<string, unknown>): string {
 export type AskEvent =
   | { type: 'sources'; sources: AskResult['sources']; scopeFallback?: AskResult['scopeFallback'] }
   | { type: 'delta'; text: string }
-  | { type: 'done'; model: string; degraded: boolean }
+  // `metrics` is absent when the LLM never answered (no headers, no usage).
+  | { type: 'done'; model: string; degraded: boolean; metrics?: AskMetrics }
   | { type: 'error'; message: string };
 
 /**

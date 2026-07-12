@@ -239,8 +239,38 @@ export function PickProject({
   );
 }
 
-export function Spinner() {
-  return <div className="text-faint font-mono text-sm py-8 text-center">querying…</div>;
+/**
+ * The one "we are working" signal, used by search, ask and retry alike.
+ *
+ * Static text ("querying…") cannot distinguish a slow request from a hung one:
+ * both look identical. A moving indicator says the request is still alive, which
+ * is the actual question a waiting user is asking. Motion is CSS-only and is
+ * dropped entirely under prefers-reduced-motion (see styles.css).
+ */
+export function Pulse({ label = 'querying' }: { label?: string }) {
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 font-mono text-sm text-faint"
+      role="status"
+      aria-live="polite"
+    >
+      <span className="dots" aria-hidden>
+        <i />
+        <i />
+        <i />
+      </span>
+      {label}…
+    </span>
+  );
+}
+
+/** Block-level wait state for a whole panel (search results, a view). */
+export function Spinner({ label = 'querying' }: { label?: string }) {
+  return (
+    <div className="py-8 text-center">
+      <Pulse label={label} />
+    </div>
+  );
 }
 
 /** Client-side filter box. Lists here are small and already in memory. */

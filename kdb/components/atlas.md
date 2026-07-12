@@ -372,3 +372,46 @@
 
 **Status:**
 - Completed
+---
+### [2026-07-12] - UI batch: ask composer, project filter/favourites, animations, answer telemetry, retry + list-marker fixes, clickable footnotes, md/PDF export
+
+**Objective:**
+- Ten requested UI improvements, two of them bug fixes with confirmed root causes.
+
+**Summary of Work:**
+- **List markers (bug).** Tailwind's preflight sets `list-style: none`; styles.css restored the padding but never the marker, so answers rendered as unlabelled indented paragraphs. Restored disc/decimal/circle, dimmed `::marker`, and suppressed the bullet on GFM task items (they carry their own checkbox).
+- **Retry (bug).** `run()` reset content/sources/streaming/error but NOT `degraded` — and the banner renders on `degraded && !error`, so clearing `error` on retry actively turned the stale "LLM unavailable" banner back ON. Now resets the whole per-attempt result (EMPTY_RESULT). Also replaced the static "reading sources…" text with an animated indicator.
+- **Answer telemetry (correctness, not just display).** Probed the live G2P gateway during design and found the UI was reporting the WRONG model: it displayed `llmConfig.model` (what we requested) while the gateway served something else. Now reads `X-G2p-Reply-Model` / `X-G2p-Reply-Attempts` / `X-Request-Id` from the response, opts into `stream_options.include_usage` for real token counts, measures TTFT server-side, and derives tok/s over generation time (total − ttft) so a slow queue is not reported as a slow model. Model substitution is normal G2P routing, so it is stated as fact, not flagged.
+- **Footnotes.** `[n]` citations became real controls that scroll to + flash their source row, with a hover card. Gated on the known source set, so a model-invented `[9]` stays inert rather than becoming a button to nowhere.
+- **Export.** Markdown + PDF (jsPDF v4 standalone) + copy, generated from the answer's markdown and structured sources — not from the DOM.
+- **Composer + sidebar.** Follow-up field under the reply sharing one text value with the top bar; project filter reusing the existing FilterInput/matches/Highlight; favourites pinned when idle, flattening to a ranked list while filtering.
+
+**Key Decisions & Rationale:**
+- **Additive `llm.ts` signatures over a tagged-union rewrite.** The first design changed `chatStream`/`createSseParser` to yield a union. Reading the tests killed it: six parser tests pin `string[]`. An optional usage sink + an `onMeta` callback deliver the same feature with a strictly smaller diff and zero test churn (§3.3 "Modify & Reuse").
+- **jsPDF WITHOUT html2canvas.** The usual pairing rasterises the DOM: dead footnote links, unselectable text, and it cannot parse the `color-mix()` this theme is built on (badges would render as black boxes). It would also have exported the dark theme onto paper. Generating from the source data gives selectable text, live links and a light page. Measured 242 KB gzip, lazy-imported so only the person exporting pays. Rejected pdf-lib (dead since 2022) and pdfmake (355 KB for a layout engine we would not use).
+- **Telemetry must never break the answer it describes.** Header reads are defensive and a failed call reports NO metrics rather than zeroes.
+
+**Code/Files Modified:**
+- packages/core/src/llm.ts
+- packages/core/src/ask.ts
+- packages/ui/src/components/Markdown.tsx
+- packages/ui/src/components/Sidebar.tsx
+- packages/ui/src/components/ExportReply.tsx
+- packages/ui/src/components/ui.tsx
+- packages/ui/src/views/AskConversation.tsx
+- packages/ui/src/views/SearchView.tsx
+- packages/ui/src/usePersistentState.ts
+- packages/ui/src/styles.css
+- packages/ui/src/types.ts
+- packages/ui/src/api.ts
+- packages/ui/vite.config.ts
+- docs/architecture.md, docs/api.md
+- docs/superpowers/specs/2026-07-12-atlas-ui-improvements-design.md
+
+**Outcomes & Lessons Learned:**
+- **What Worked:** Probing the real gateway *before* designing — it exposed the wrong-model bug that reframed a "display toggle" as a correctness fix, and proved token usage was available rather than needing estimation. Verifying in a real browser engine (the CSS fix is untestable in jsdom, which applies no stylesheets).
+- **What Failed:** (1) Deployed stale JS for ~15 min: `tsc --noEmit` typechecks but emits nothing, and the Docker build ships `packages/*/dist` as-is — the container ran old code while the source was correct. Logged to backlog. (2) Two React memo bugs the unit tests could not see: passing a fresh `new Set()` each render defeated Markdown's `useMemo`, and a fresh `{__html}` object literal made React re-set `innerHTML` even when the string was identical — together they rebuilt the answer's DOM continuously, so citations were destroyed faster than they could be clicked. Found via a MutationObserver in a real browser; now pinned by render-stability tests. (3) A Playwright click "failure" that was a harness artifact (its synthetic pointer fights the hover card it triggers); the DOM and keyboard paths both work, and the peek card now dismisses on jump.
+- Verified live: served model `google/gemini-2.5-flash`, 8453/893 tokens, TTFT 1568ms, 346.8 tok/s, 2 gateway attempts.
+
+**Status:**
+- Completed

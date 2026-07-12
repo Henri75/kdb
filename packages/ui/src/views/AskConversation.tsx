@@ -1,8 +1,9 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
-import type { AskSource, SourceType } from '../types';
-import { Badge, CopyButton, Stamp } from '../components/ui';
+import type { AskMetrics, AskSource, SourceType } from '../types';
+import { Badge, CopyButton, Pulse, Stamp } from '../components/ui';
 import { Markdown } from '../components/Markdown';
+import { ExportButtons, type Exportable } from '../components/ExportReply';
 
 /**
  * Multi-turn Ask. Each turn is addressable, so a reply can be retried and any
@@ -22,7 +23,24 @@ export interface Turn {
   degraded?: boolean;
   /** Set when the asked-for project was empty and the search widened to all. */
   scopeFallback?: { requested: string; usedAllProjects: true };
+  /** What it cost to produce this reply. Absent when the LLM never answered. */
+  metrics?: AskMetrics;
 }
+
+/**
+ * Everything `run()` derives for a single attempt. Retrying an answer must reset
+ * *all* of it: leaving `degraded` behind from a failed attempt made the
+ * "LLM unavailable" banner reappear on a successful retry, because the banner
+ * renders on `degraded && !error` and the retry had just cleared `error`.
+ */
+const EMPTY_RESULT = {
+  content: '',
+  sources: [],
+  error: undefined,
+  degraded: false,
+  scopeFallback: undefined,
+  metrics: undefined,
+} satisfies Partial<Turn>;
 
 let seq = 0;
 const newId = () => `t${++seq}`;
@@ -71,7 +89,9 @@ export function useAskConversation(
       const controller = new AbortController();
       abortRef.current = controller;
 
-      patch(answerId, { content: '', sources: [], streaming: true, error: undefined });
+      // Clear every trace of the previous attempt, not just the visible text —
+      // a stale `degraded` used to resurrect the "LLM unavailable" banner here.
+      patch(answerId, { ...EMPTY_RESULT, streaming: true });
 
       try {
         const stream = api.askStream(
@@ -91,7 +111,8 @@ export function useAskConversation(
             commit((prev) =>
               prev.map((t) => (t.id === answerId ? { ...t, content: t.content + ev.text } : t)),
             );
-          } else if (ev.type === 'done') patch(answerId, { degraded: ev.degraded });
+          } else if (ev.type === 'done')
+            patch(answerId, { degraded: ev.degraded, metrics: ev.metrics });
           else if (ev.type === 'error') patch(answerId, { error: ev.message });
         }
       } catch (e) {
@@ -167,6 +188,78 @@ function describeError(e: unknown): string {
   return msg.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200);
 }
 
+/** Millisecond durations read better at human scale: 412ms, 1.4s. */
+function ms(v: number): string {
+  return v < 1000 ? `${Math.round(v)}ms` : `${(v / 1000).toFixed(1)}s`;
+}
+
+/**
+ * What produced this answer, stated as fact.
+ *
+ * The model shown is the one the gateway *served*, not the one config asked for:
+ * G2P routes by policy and substitutes freely, so the configured name would
+ * attribute the answer to a model that never saw the question. Substitution is
+ * normal and therefore not flagged — a warning that fires on every reply is
+ * noise. `attempts > 1` *is* worth surfacing (the gateway failed over), so it
+ * rides along in the tooltip with the request id.
+ */
+function Metrics({ m }: { m: AskMetrics }) {
+  const bits: string[] = [];
+  if (m.totalTokens !== undefined) bits.push(`${m.totalTokens} tok`);
+  if (m.ttftMs !== undefined) bits.push(`${ms(m.ttftMs)} to first token`);
+  if (m.tokensPerSec !== undefined) bits.push(`${m.tokensPerSec} tok/s`);
+
+  const detail = [
+    m.promptTokens !== undefined && `prompt ${m.promptTokens} · completion ${m.completionTokens}`,
+    m.totalMs !== undefined && `total ${ms(m.totalMs)}`,
+    m.attempts !== undefined && m.attempts > 1 && `${m.attempts} gateway attempts`,
+    m.requestId && `request ${m.requestId}`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  return (
+    <p className="font-mono text-[10px] text-faint mt-2 flex items-center gap-1.5" title={detail}>
+      <span style={{ color: 'var(--color-claude)' }}>{m.model}</span>
+      {bits.length > 0 && <span>· {bits.join(' · ')}</span>}
+      {m.attempts !== undefined && m.attempts > 1 && (
+        <span style={{ color: 'var(--color-report)' }}>· {m.attempts} attempts</span>
+      )}
+    </p>
+  );
+}
+
+/** The floating card shown while a [n] marker is hovered or focused. */
+function CitePeek({
+  source,
+  at,
+}: {
+  source: AskSource;
+  at: { x: number; y: number };
+}) {
+  return (
+    <div
+      role="tooltip"
+      className="fixed z-50 max-w-md -translate-x-1/2 -translate-y-full pointer-events-none rise"
+      style={{ left: at.x, top: at.y - 8 }}
+    >
+      <div className="rounded-md border border-line bg-panel-2 px-3 py-2 shadow-lg">
+        <div className="flex items-baseline gap-2">
+          <span className="font-mono text-[11px]" style={{ color: 'var(--color-kdb)' }}>
+            [{source.n}]
+          </span>
+          <Badge source={source.sourceType} />
+          <Stamp iso={source.occurredAt} />
+        </div>
+        <div className="mt-1 text-[13px] text-ink">{source.title}</div>
+        <div className="mt-0.5 font-mono text-[10px] text-faint break-all">
+          {source.projectSlug} · {source.sourcePath}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function Conversation({
   turns,
   onRetry,
@@ -178,6 +271,29 @@ export function Conversation({
   onDelete: (id: string) => void;
   onOpenEntry: (entryId: number) => void;
 }) {
+  const citations = useCitationSets(turns);
+  // Which [n] is being hovered, and where to float its card.
+  const [peek, setPeek] = useState<{ turnId: string; n: number; at: { x: number; y: number } } | null>(
+    null,
+  );
+  // The source row a citation jumped to, flashed briefly so the eye can find it
+  // — scrolling something into view without marking it leaves the user hunting.
+  const [flash, setFlash] = useState<string>('');
+
+  const jumpToSource = (turnId: string, n: number) => {
+    const el = document.getElementById(`src-${turnId}-${n}`);
+    if (!el) return;
+    // The peek card is position:fixed at the marker's old viewport coordinates.
+    // Once the user commits to jumping, the preview has done its job — leaving it
+    // pinned mid-air while the page scrolls under it just looks broken.
+    setPeek(null);
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setFlash(`${turnId}-${n}`);
+    setTimeout(() => setFlash(''), 1600);
+  };
+
+  const peeked = peek && turns.find((t) => t.id === peek.turnId)?.sources?.find((s) => s.n === peek.n);
+
   return (
     <div className="mt-6 space-y-4">
       {turns.map((t) =>
@@ -200,15 +316,22 @@ export function Conversation({
                     {t.error}
                   </p>
                 ) : t.content ? (
-                  <Markdown text={t.content} />
+                  <Markdown
+                    text={t.content}
+                    citations={citations.get(t.id)}
+                    onCite={(n) => jumpToSource(t.id, n)}
+                    onCitePeek={(n, at) =>
+                      setPeek(n === null || !at ? null : { turnId: t.id, n, at })
+                    }
+                  />
                 ) : (
-                  <span className="font-mono text-sm text-faint">
-                    {t.streaming ? 'reading sources…' : ''}
-                  </span>
+                  // Before the first token there is nothing to show but the
+                  // wait itself — so show that it is *alive*, not just pending.
+                  t.streaming && <Pulse label="reading sources" />
                 )}
                 {t.streaming && t.content && (
                   <span
-                    className="inline-block w-[7px] h-[15px] translate-y-[2px] ml-0.5 animate-pulse"
+                    className="caret inline-block w-[7px] h-[15px] translate-y-[2px] ml-0.5"
                     style={{ background: 'var(--color-kdb)' }}
                     aria-hidden
                   />
@@ -218,12 +341,32 @@ export function Conversation({
                     ⚠ LLM unavailable — sources only
                   </p>
                 )}
+
+                {/* Footer: what produced the answer on the left, what you can do
+                    with it on the right. Both belong to the reply, so both live
+                    inside its card. */}
+                {!t.streaming && (
+                  <div className="mt-2 flex items-end justify-between gap-4">
+                    {t.metrics && !t.error ? <Metrics m={t.metrics} /> : <span />}
+                    <ReplyToolbar
+                      onRetry={() => onRetry(t.id)}
+                      copyText={t.content || undefined}
+                      exportable={
+                        t.content && !t.error
+                          ? {
+                              question: questionFor(turns, t.id),
+                              content: t.content,
+                              sources: t.sources,
+                            }
+                          : undefined
+                      }
+                    />
+                  </div>
+                )}
               </div>
-              <TurnActions
-                onRetry={t.streaming ? undefined : () => onRetry(t.id)}
-                onDelete={() => onDelete(t.id)}
-                copyText={t.content && !t.streaming ? t.content : undefined}
-              />
+              {/* Delete acts on the turn, not on its content, so it stays in the
+                  gutter with the question's own delete control. */}
+              <TurnActions onDelete={() => onDelete(t.id)} />
             </div>
 
             {t.scopeFallback && (
@@ -239,7 +382,10 @@ export function Conversation({
                   // button — invalid to nest). The title area is the click target.
                   <div
                     key={s.n}
-                    className="group/src flex items-baseline gap-2 text-sm rounded px-1 py-0.5 hover:bg-panel"
+                    id={`src-${t.id}-${s.n}`}
+                    className={`group/src flex items-baseline gap-2 text-sm rounded px-1 py-0.5 transition-colors ${
+                      flash === `${t.id}-${s.n}` ? 'cite-flash' : 'hover:bg-panel'
+                    }`}
                   >
                     <button
                       onClick={() => onOpenEntry(s.entryId)}
@@ -264,22 +410,56 @@ export function Conversation({
           </div>
         ),
       )}
+      {peeked && peek && <CitePeek source={peeked} at={peek.at} />}
     </div>
   );
 }
 
-function TurnActions({
+/**
+ * The citation numbers each reply actually has sources for, keyed by turn.
+ *
+ * Built once per turns-change rather than inline per render: a fresh Set on
+ * every render is a new prop identity, which would defeat Markdown's memo and
+ * rebuild the answer's DOM continuously.
+ */
+function useCitationSets(turns: Turn[]): Map<string, ReadonlySet<number>> {
+  return useMemo(() => {
+    const m = new Map<string, ReadonlySet<number>>();
+    for (const t of turns) {
+      if (t.role === 'assistant') m.set(t.id, new Set((t.sources ?? []).map((s) => s.n)));
+    }
+    return m;
+  }, [turns]);
+}
+
+/** The user turn immediately above an answer — its question, for the export. */
+function questionFor(turns: Turn[], answerId: string): string | undefined {
+  const at = turns.findIndex((t) => t.id === answerId);
+  const prev = at > 0 ? turns[at - 1] : undefined;
+  return prev?.role === 'user' ? prev.content : undefined;
+}
+
+/**
+ * The reply's own toolbar, sitting in its footer next to the metrics.
+ *
+ * Copy/export/retry belong *to the answer*, so they live inside its card rather
+ * than in the narrow gutter beside it: five controls stacked in that column read
+ * as a jumble, and the labelled ones ("md", "pdf") never fit the icon rhythm of
+ * the rest. Delete stays in the gutter — it acts on the turn, not the content.
+ */
+function ReplyToolbar({
   onRetry,
-  onDelete,
   copyText,
+  exportable,
 }: {
   onRetry?: () => void;
-  onDelete: () => void;
   copyText?: string;
+  exportable?: Exportable;
 }) {
   return (
-    <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+    <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
       {copyText && <CopyButton text={copyText} title="Copy reply" />}
+      {exportable && <ExportButtons reply={exportable} />}
       {onRetry && (
         <button
           onClick={onRetry}
@@ -290,6 +470,14 @@ function TurnActions({
           ↻
         </button>
       )}
+    </div>
+  );
+}
+
+/** Removing a turn — the one action that is about the turn, not its content. */
+function TurnActions({ onDelete }: { onDelete: () => void }) {
+  return (
+    <div className="flex flex-col items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
       <button
         onClick={onDelete}
         title="Remove from conversation"
@@ -297,6 +485,69 @@ function TurnActions({
         className="text-muted hover:text-ink text-[13px] leading-none px-1"
       >
         ✕
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Follow-up composer, sitting under the conversation where the reply ends.
+ *
+ * It shares one text value with the top search bar rather than holding its own:
+ * two independent inputs let half-typed text sit forgotten in the off-screen one
+ * and get sent by accident. Autofocused when a reply lands so a follow-up needs
+ * no scroll and no click.
+ */
+export function AskComposer({
+  value,
+  onChange,
+  onSend,
+  busy,
+  autoFocusKey,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onSend: () => void;
+  busy: boolean;
+  /** Changes when a reply completes; refocuses the field for the next question. */
+  autoFocusKey: number;
+}) {
+  const ref = useRef<HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    if (!busy) ref.current?.focus();
+  }, [autoFocusKey, busy]);
+
+  return (
+    <div className="mt-4 flex items-end gap-2">
+      <textarea
+        ref={ref}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          // Enter sends; Shift+Enter is a newline. A follow-up is usually one
+          // line, so requiring a modifier to send would be the wrong default.
+          if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            if (!busy) onSend();
+          }
+        }}
+        rows={1}
+        placeholder="Ask a follow-up… (Enter to send, Shift+Enter for a new line)"
+        aria-label="Ask a follow-up"
+        className="flex-1 resize-none bg-panel border border-line rounded-md px-4 py-3 text-[14px] placeholder:text-faint field-sizing-content max-h-40"
+      />
+      <button
+        onClick={onSend}
+        disabled={busy || !value.trim()}
+        className="px-4 py-3 rounded-md text-sm font-medium border disabled:opacity-40 whitespace-nowrap"
+        style={{
+          borderColor: 'var(--color-kdb)',
+          color: 'var(--color-kdb)',
+          background: 'color-mix(in srgb, var(--color-kdb) 8%, transparent)',
+        }}
+      >
+        {busy ? <Pulse label="thinking" /> : 'Send'}
       </button>
     </div>
   );

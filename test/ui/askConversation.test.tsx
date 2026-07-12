@@ -169,3 +169,146 @@ describe('Conversation', () => {
     expect(screen.getByText('API is not reachable.')).toBeTruthy();
   });
 });
+
+/**
+ * The reported bug: retrying a failed reply still showed "LLM unavailable".
+ *
+ * `run()` reset content/sources/streaming/error but *not* `degraded`, and the
+ * banner renders on `degraded && !error` — so clearing `error` on retry actively
+ * turned the stale banner back on. These pin every field of a previous attempt.
+ */
+describe('useAskConversation — retry clears the previous attempt', () => {
+  const failed = sse(
+    { type: 'sources', sources: [] },
+    { type: 'delta', text: '\n\n_LLM unavailable (boom)._' },
+    { type: 'done', model: 'm', degraded: true },
+  );
+  const ok = sse(
+    { type: 'sources', sources: [] },
+    { type: 'delta', text: 'The real answer.' },
+    {
+      type: 'done',
+      model: 'm',
+      degraded: false,
+      metrics: { model: 'gemma-4-31b-it', substituted: true, totalTokens: 30 },
+    },
+  );
+
+  it('clears degraded, the failure prose and the stale metrics', async () => {
+    // First attempt fails, second succeeds.
+    let body = failed;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        body: new ReadableStream({
+          start(c) {
+            c.enqueue(new TextEncoder().encode(body));
+            c.close();
+          },
+        }),
+      })),
+    );
+
+    const { result } = renderHook(() => useAskConversation('p', () => {}));
+    act(() => result.current.send('q'));
+    await waitFor(() => expect(result.current.turns[1]!.streaming).toBe(false));
+
+    expect(result.current.turns[1]!.degraded).toBe(true);
+    expect(result.current.turns[1]!.content).toContain('LLM unavailable');
+
+    body = ok;
+    act(() => result.current.retry(result.current.turns[1]!.id));
+    await waitFor(() => expect(result.current.turns[1]!.streaming).toBe(false));
+
+    const reply = result.current.turns[1]!;
+    // The banner's condition must now be false...
+    expect(reply.degraded).toBe(false);
+    // ...and the failure text must not survive in the body either.
+    expect(reply.content).toBe('The real answer.');
+    expect(reply.content).not.toContain('LLM unavailable');
+    expect(reply.metrics?.model).toBe('gemma-4-31b-it');
+  });
+
+  it('drops metrics from a previous attempt when the retry reports none', async () => {
+    let body = ok;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        body: new ReadableStream({
+          start(c) {
+            c.enqueue(new TextEncoder().encode(body));
+            c.close();
+          },
+        }),
+      })),
+    );
+
+    const { result } = renderHook(() => useAskConversation('p', () => {}));
+    act(() => result.current.send('q'));
+    await waitFor(() => expect(result.current.turns[1]!.metrics).toBeTruthy());
+
+    // A degraded retry carries no metrics; the old ones must not linger.
+    body = failed;
+    act(() => result.current.retry(result.current.turns[1]!.id));
+    await waitFor(() => expect(result.current.turns[1]!.streaming).toBe(false));
+
+    expect(result.current.turns[1]!.metrics).toBeUndefined();
+    expect(result.current.turns[1]!.degraded).toBe(true);
+  });
+});
+
+describe('Conversation — metrics', () => {
+  const withMetrics = (metrics: any): Turn[] => [
+    { id: 'a', role: 'user', content: 'q' },
+    { id: 'b', role: 'assistant', content: 'answer', sources: [], metrics },
+  ];
+
+  it('reports the model that actually served the answer', () => {
+    render(
+      <Conversation
+        turns={withMetrics({
+          model: 'gemma-4-31b-it',
+          substituted: true,
+          totalTokens: 30,
+          ttftMs: 412,
+          tokensPerSec: 18.3,
+        })}
+        onRetry={() => {}}
+        onDelete={() => {}}
+        onOpenEntry={() => {}}
+      />,
+    );
+    expect(screen.getByText('gemma-4-31b-it')).toBeTruthy();
+    expect(screen.getByText(/30 tok/)).toBeTruthy();
+    expect(screen.getByText(/412ms to first token/)).toBeTruthy();
+    expect(screen.getByText(/18\.3 tok\/s/)).toBeTruthy();
+  });
+
+  it('shows the model alone when the provider reported no token usage', () => {
+    render(
+      <Conversation
+        turns={withMetrics({ model: 'gemma-4-31b-it', substituted: false })}
+        onRetry={() => {}}
+        onDelete={() => {}}
+        onOpenEntry={() => {}}
+      />,
+    );
+    expect(screen.getByText('gemma-4-31b-it')).toBeTruthy();
+    // Never a fabricated zero for something nobody measured.
+    expect(screen.queryByText(/0 tok/)).toBeNull();
+  });
+
+  it('renders nothing when the LLM never answered', () => {
+    const degraded: Turn[] = [
+      { id: 'a', role: 'user', content: 'q' },
+      { id: 'b', role: 'assistant', content: 'sources only', sources: [], degraded: true },
+    ];
+    const { container } = render(
+      <Conversation turns={degraded} onRetry={() => {}} onDelete={() => {}} onOpenEntry={() => {}} />,
+    );
+    expect(screen.getByText(/LLM unavailable/)).toBeTruthy();
+    expect(container.querySelector('[title*="request"]')).toBeNull();
+  });
+});

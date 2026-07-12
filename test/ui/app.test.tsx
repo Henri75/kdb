@@ -45,7 +45,7 @@ describe('App shell', () => {
   it('renders the sidebar with projects and stats', async () => {
     stubOk();
     render(<App />);
-    expect(screen.getByText('Scope')).toBeTruthy();
+    expect(screen.getByText('Atlas')).toBeTruthy();
     await waitFor(() => expect(screen.getByText('deepcast')).toBeTruthy());
     // "Overview" is both the nav item and the page heading.
     expect(screen.getAllByText('Overview').length).toBeGreaterThanOrEqual(1);

@@ -49,6 +49,30 @@ export interface ScopeFallback {
   usedAllProjects: true;
 }
 
+/**
+ * What an answer cost, as measured by the API (never estimated here).
+ *
+ * Every field past `model` is optional: a gateway may not report usage, and a
+ * failed call reports nothing at all. Render what is present; never show a zero
+ * in place of a number nobody measured.
+ */
+export interface AskMetrics {
+  /** The model that actually answered — gateways substitute by routing policy. */
+  model: string;
+  /** True when the served model differs from the one the config requested. */
+  substituted: boolean;
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+  /** Milliseconds until the first token — the latency a user actually feels. */
+  ttftMs?: number;
+  totalMs?: number;
+  tokensPerSec?: number;
+  /** > 1 means the gateway failed over internally before succeeding. */
+  attempts?: number;
+  requestId?: string;
+}
+
 export interface AskResult {
   answer: string;
   sources: AskSource[];

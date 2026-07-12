@@ -48,3 +48,90 @@ describe('Markdown', () => {
     expect(container.querySelector('pre code')?.textContent).toContain('nexus-ctl drain');
   });
 });
+
+/**
+ * Citations are interactive, and that interactivity must not become an injection
+ * vector: the transform still runs on already-sanitized HTML, and the only thing
+ * interpolated into it is a run of digits.
+ */
+describe('Markdown — citation links', () => {
+  const known = new Set([1, 2]);
+
+  it('links a citation that has a matching source', () => {
+    const { container } = render(<Markdown text="grounded [1]" citations={known} />);
+    const cite = container.querySelector('sup.kdb-cite-link');
+    expect(cite?.getAttribute('data-cite')).toBe('1');
+    expect(cite?.getAttribute('role')).toBe('button');
+  });
+
+  it('leaves a citation with no source inert', () => {
+    // Models invent citations. A [9] with two sources must not become a control
+    // that navigates nowhere.
+    const { container } = render(<Markdown text="invented [9]" citations={known} />);
+    expect(container.querySelector('sup.kdb-cite-link')).toBeNull();
+    expect(container.querySelector('sup.kdb-cite')?.textContent).toBe('[9]');
+  });
+
+  it('reports the citation number when one is activated', async () => {
+    const seen: number[] = [];
+    const { container } = render(
+      <Markdown text="see [2]" citations={known} onCite={(n) => seen.push(n)} />,
+    );
+    (container.querySelector('sup.kdb-cite-link') as HTMLElement).click();
+    expect(seen).toEqual([2]);
+  });
+
+  it('never emits an inline event handler', () => {
+    // The click path is a delegated React listener reading data-cite. An inline
+    // onclick would be both stripped by DOMPurify and an injection vector.
+    const { container } = render(<Markdown text="a [1] b" citations={known} />);
+    expect(container.innerHTML).not.toContain('onclick');
+  });
+
+  it('does not let injected markup ride in on a citation', () => {
+    const { container } = render(
+      <Markdown text={'<img src=x onerror="alert(1)"> [1]'} citations={known} />,
+    );
+    expect(container.innerHTML).not.toContain('onerror');
+    // The legitimate citation still linkifies.
+    expect(container.querySelector('sup.kdb-cite-link')).toBeTruthy();
+  });
+
+  it('renders citations without links when no source list is supplied', () => {
+    // Backwards compatible: the amber superscript still renders.
+    const { container } = render(<Markdown text="plain [1]" />);
+    expect(container.querySelector('sup.kdb-cite')).toBeTruthy();
+    expect(container.querySelector('sup.kdb-cite-link')).toBeNull();
+  });
+});
+
+/**
+ * Found in a real browser, invisible to a single-snapshot test: passing a fresh
+ * `new Set()` each render gave the memo a new dependency identity every time, so
+ * the answer was re-parsed and its DOM replaced continuously — the citation
+ * elements were destroyed and rebuilt faster than they could be clicked.
+ * The memo must key on the set's *contents*, not its identity.
+ */
+describe('Markdown — render stability', () => {
+  it('reuses the parsed HTML when an equal-but-new citation Set is passed', () => {
+    const { container, rerender } = render(
+      <Markdown text="cited [1]" citations={new Set([1])} />,
+    );
+    const first = container.querySelector('sup.kdb-cite-link');
+
+    // Exactly what a parent does when it builds the set inline in render.
+    rerender(<Markdown text="cited [1]" citations={new Set([1])} />);
+    const second = container.querySelector('sup.kdb-cite-link');
+
+    // Same node object: the subtree was not rebuilt.
+    expect(second).toBe(first);
+  });
+
+  it('re-renders when the citation set genuinely changes', () => {
+    const { container, rerender } = render(<Markdown text="a [1] b [2]" citations={new Set([1])} />);
+    expect(container.querySelectorAll('sup.kdb-cite-link')).toHaveLength(1);
+
+    rerender(<Markdown text="a [1] b [2]" citations={new Set([1, 2])} />);
+    expect(container.querySelectorAll('sup.kdb-cite-link')).toHaveLength(2);
+  });
+});

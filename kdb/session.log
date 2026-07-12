@@ -107,3 +107,11 @@
 
 **AI Response Summary:**
 > README was already clean on the branch — what showed KDBScope was `main`, which had never received the rename. Fast-forwarded main (3 commits, no conflicts possible) and pushed; GitHub now shows "# Atlas". Renamed kdb/components/kdbscope.log -> atlas.log via git mv, since the component id is derived from the filename (scanners.ts basename), and registered the rename in index.log rather than rewriting the historical [kdbscope] tags — those are append-only and were truthful on their dates. Repointed the two ADRs. Left the 16 datastore identifiers (pg, qdrant prefix, redis, ids.ts namespace, KDBSCOPE_API_URL) as kdbscope by design. Moved origin to github.com/Henri75/Atlas after the user's repo rename; the old URL still redirects. 336 tests + tsc green, 282.5k entries live.
+---
+### [2026-07-12 22:55 UTC]
+
+**User Prompt Summary:**
+> Improve the Atlas UI: ask field under the reply, project search/filter, loading animations, show the answering model + tokens/TTFT/tok-per-sec, fix the retry button still showing "LLM unavailable" with no spinner, fix missing bullet glyphs, make footnotes clickable + hoverable, add markdown/PDF download + copy, and add favourite projects. Then self-review the design and spec, implement, test, document, commit and push.
+
+**AI Response Summary:**
+> Probed the live G2P gateway while designing and found the UI attributed answers to the *requested* model rather than the one that served them, so the telemetry item became a correctness fix; also confirmed real token usage was on the wire. Shipped all ten items, root-caused both reported bugs (retry never reset `degraded`, and Tailwind's preflight zeroed `list-style`), and rejected jsPDF+html2canvas for jsPDF standalone after measuring. Browser verification caught two React memo bugs that were rebuilding the answer's DOM continuously and a stale-`dist` deploy that unit tests could never have seen. 372 tests green.

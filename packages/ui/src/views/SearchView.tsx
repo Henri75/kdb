@@ -3,7 +3,7 @@ import { api } from '../api';
 import type { EntryKind, SearchResult, SourceType } from '../types';
 import { Badge, DegradedBanner, Empty, MultiSelect, SpineRow, Spinner, Stamp } from '../components/ui';
 import { EntryDrawer } from '../components/EntryDrawer';
-import { Conversation, useAskConversation } from './AskConversation';
+import { AskComposer, Conversation, useAskConversation } from './AskConversation';
 
 /** Search + Ask: one input, two modes. '/' focuses; Enter searches; ⌘Enter asks. */
 
@@ -263,12 +263,25 @@ export function SearchView({
       )}
 
       {mode === 'ask' && ask.turns.length > 0 && (
-        <Conversation
-          turns={ask.turns}
-          onRetry={ask.retry}
-          onDelete={ask.remove}
-          onOpenEntry={setOpenEntry}
-        />
+        <>
+          <Conversation
+            turns={ask.turns}
+            onRetry={ask.retry}
+            onDelete={ask.remove}
+            onOpenEntry={setOpenEntry}
+          />
+          {/* The follow-up field lives where the reading ends. The top bar is
+              off-screen after a long answer, and scrolling up to ask — then back
+              down to read — is the friction this removes. It shares `q` with the
+              top bar so there is only ever one question in flight. */}
+          <AskComposer
+            value={q}
+            onChange={setQ}
+            onSend={runAsk}
+            busy={busy}
+            autoFocusKey={ask.turns.length}
+          />
+        </>
       )}
 
       {!loading && mode === 'search' && result && !error && (

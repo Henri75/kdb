@@ -1,5 +1,5 @@
 import type { AppConfig } from './config.js';
-import { chatComplete, chatStream, type ChatMessage } from './llm.js';
+import { chatComplete, chatStream, type ChatMessage, type StreamMeta } from './llm.js';
 import type { SearchService } from './search.js';
 import type { Catalog } from './catalog.js';
 import type { AskResult, AskSource, ScopeFallback, SearchFilters, SearchHit } from './types.js';
@@ -127,12 +127,75 @@ export function buildAskPrompt(question: string, hits: SearchHit[], bodies: Map<
   return `Context blocks:\n\n${blocks}\n\nQuestion: ${question}`;
 }
 
+/**
+ * What it cost to produce an answer, measured rather than estimated.
+ *
+ * Optional throughout: when the LLM is unreachable the request never returns
+ * headers or a usage frame, so a degraded answer carries no metrics at all.
+ * Consumers must render nothing rather than render zeroes.
+ */
+export interface AskMetrics {
+  /** The model that actually answered (gateways substitute by routing policy). */
+  model: string;
+  /** True when the gateway served a different model than the one configured. */
+  substituted: boolean;
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+  ttftMs?: number;
+  /** Wall-clock for the whole completion. */
+  totalMs?: number;
+  /** Completion tokens per second of generation (excludes the wait for token 1). */
+  tokensPerSec?: number;
+  /** > 1 means the gateway failed over internally before it succeeded. */
+  attempts?: number;
+  requestId?: string;
+}
+
 /** Events emitted by the streaming Ask pipeline, in order. */
 export type AskEvent =
   | { type: 'sources'; sources: AskSource[]; scopeFallback?: ScopeFallback }
   | { type: 'delta'; text: string }
-  | { type: 'done'; model: string; degraded: boolean }
+  | { type: 'done'; model: string; degraded: boolean; metrics?: AskMetrics }
   | { type: 'error'; message: string };
+
+/**
+ * Fold raw stream telemetry into what the UI shows.
+ *
+ * tok/s divides by generation time (total − ttft), not total time: including the
+ * wait for the first token would report a slow *queue* as a slow *model*. The
+ * denominator is guarded — a sub-millisecond reply would otherwise yield
+ * Infinity, and "∞ tok/s" is worse than saying nothing.
+ */
+function toMetrics(meta: StreamMeta, requestedModel: string, totalMs: number): AskMetrics {
+  const served = meta.servedModel ?? requestedModel;
+  const genMs = meta.ttftMs !== undefined ? totalMs - meta.ttftMs : totalMs;
+  const completion = meta.usage?.completionTokens;
+  const tokensPerSec =
+    completion && completion > 0 && genMs > 0
+      ? Math.round((completion / (genMs / 1000)) * 10) / 10
+      : undefined;
+
+  return {
+    model: served,
+    // Compared on the bare name: the gateway answers `google/gemma-4-31b-it`
+    // for a configured `gemma-4-31b-it`, and that is the same model, not a swap.
+    substituted: bareModel(served) !== bareModel(requestedModel),
+    promptTokens: meta.usage?.promptTokens,
+    completionTokens: completion,
+    totalTokens: meta.usage?.totalTokens,
+    ttftMs: meta.ttftMs,
+    totalMs,
+    tokensPerSec,
+    attempts: meta.attempts,
+    requestId: meta.requestId,
+  };
+}
+
+/** `google/gemma-4-31b-it` → `gemma-4-31b-it`. Vendor prefixes are noise here. */
+function bareModel(m: string): string {
+  return m.split('/').pop()!.toLowerCase();
+}
 
 interface Prepared {
   sources: AskSource[];
@@ -292,11 +355,26 @@ export class AskService {
       return;
     }
 
+    // Telemetry accrues as the stream progresses (headers, then first token,
+    // then usage), so even a stream that dies half-way still reports which
+    // model was answering when it broke.
+    let meta: StreamMeta = {};
+    const startedAt = Date.now();
+
     try {
-      for await (const delta of chatStream(this.llmConfig, prepared.messages)) {
+      for await (const delta of chatStream(this.llmConfig, prepared.messages, {
+        onMeta: (m) => {
+          meta = m;
+        },
+      })) {
         yield { type: 'delta', text: delta };
       }
-      yield { type: 'done', model: this.llmConfig.model, degraded: false };
+      yield {
+        type: 'done',
+        model: this.llmConfig.model,
+        degraded: false,
+        metrics: toMetrics(meta, this.llmConfig.model, Date.now() - startedAt),
+      };
     } catch (e) {
       yield {
         type: 'delta',
@@ -304,6 +382,8 @@ export class AskService {
           `\n\n_LLM unavailable (${(e as Error).message.slice(0, 200)}). ` +
           'The sources above are the most relevant indexed results._',
       };
+      // No metrics on a failed call: chatStream throws before yielding, so there
+      // are no headers and no usage. Reporting zeroes would be a fabrication.
       yield { type: 'done', model: this.llmConfig.model, degraded: true };
     }
   }

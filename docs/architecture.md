@@ -3,6 +3,7 @@
 # Architecture
 
 ## Revision History
+- 2026-07-12 22:50 UTC — Answer telemetry: the served model (from the gateway's headers) replaces the configured one, plus token usage, TTFT and generation rate. See *Served model vs configured model*.
 - 2026-07-12 13:50 UTC — Renamed the product to **Atlas** (was KDBScope). See *Naming: Atlas vs KDB* below for what did and did not change.
 - 2026-07-11 04:35 UTC — Ask mode: soft project scope with all-projects fallback (`scopeFallback`); context reranking (doc boost + `claude_session` cap) so self-indexed chatter stops crowding out docs; multi-value `source` filter.
 - 2026-07-10 22:24 UTC — Doc staleness: archived/aging model, query-time ranking, version-forced backfill.
@@ -147,6 +148,40 @@ Retrieval → rerank → numbered context blocks → OpenAI-compatible
   `claude_session` blocks are hard-capped at 50% of the k-block window (held-over
   sessions backfill only if nothing better exists). `/api/search` is not
   reranked — it returns raw relevance.
+- **Answer telemetry.** The `done` event carries `metrics?` — the model that
+  actually served the answer, provider-reported token counts, time to first
+  token, and the resulting generation rate. See [Served model vs configured
+  model](#served-model-vs-configured-model).
+
+## Served model vs configured model
+
+`LLM_MODEL` is a **request, not a guarantee**. G2P routes by policy and
+substitutes freely: a stack configured for `gemini-2.5-flash` is regularly
+answered by `gemma-4-31b-it`. This is expected, valid behaviour — not an error —
+so it is reported as fact rather than flagged as a warning.
+
+Until this was surfaced, the UI displayed `llmConfig.model` and therefore
+attributed every answer to the model *we asked for*, which was frequently not the
+one that wrote it. The served model now comes from the gateway itself:
+
+| Signal | Source | Note |
+|---|---|---|
+| served model | `X-G2p-Reply-Model` response header | falls back to the configured name if the provider sends no header |
+| gateway attempts | `X-G2p-Reply-Attempts` | `> 1` means it failed over internally — *this* is worth surfacing |
+| request id | `X-Request-Id` | correlates an answer with the gateway's logs |
+| token usage | trailing SSE frame | requires `stream_options: {include_usage: true}` on the request; the frame carries `choices: []`, so a content-only parser drops it |
+
+Two rules follow, and both are load-bearing:
+
+- **Telemetry must never break the answer it describes.** Header reads are
+  defensive: a provider (or a test stub) that omits them costs the metrics, not
+  the reply.
+- **A failed call reports no metrics at all.** `chatStream` throws before
+  yielding, so there are no headers and no usage; `done.metrics` is simply
+  absent. Substituting zeroes would misreport a call that never happened.
+
+Token rate is computed over *generation* time (`total − ttft`), not wall-clock:
+dividing by total time would blame the model for a slow retrieval queue.
 
 ## Doc staleness
 

@@ -14,7 +14,21 @@ const hit = {
   sourcePath: '/x.log',
 };
 
-function makeService(hits: unknown[], streamBody?: string) {
+/**
+ * A stubbed streaming response. Headers default to what the real G2P gateway
+ * sends (verified against a live probe): it answers with a *substituted* model,
+ * so the fixtures exercise the served-model path rather than the fallback.
+ * Pass `null` to simulate a provider that returns no telemetry headers at all.
+ */
+function makeService(
+  hits: unknown[],
+  streamBody?: string,
+  headers: Record<string, string> | null = {
+    'x-g2p-reply-model': 'google/gemma-4-31b-it',
+    'x-g2p-reply-attempts': '1',
+    'x-request-id': 'req-abc',
+  },
+) {
   const search = {
     search: async (_q: string, filters: { project?: string } = {}) => ({
       // A project scope this fixture data does not belong to matches nothing —
@@ -33,6 +47,9 @@ function makeService(hits: unknown[], streamBody?: string) {
       'fetch',
       vi.fn(async () => ({
         ok: true,
+        // `headers: null` stands in for a provider that sends none — telemetry
+        // must degrade to nothing without taking the answer down with it.
+        ...(headers ? { headers: new Headers(headers) } : {}),
         body: new ReadableStream({
           start(c) {
             c.enqueue(new TextEncoder().encode(streamBody));
@@ -200,5 +217,82 @@ describe('AskService.askStream', () => {
     const sources = events.find((e) => e.type === 'sources') as any;
     expect(sources.scopeFallback).toBeUndefined();
     expect((events[1] as any).text).toMatch(/No indexed content matched/);
+  });
+});
+
+/**
+ * Telemetry. The gateway routes by policy, so the configured model is a request
+ * and the served model is the fact — reporting the former attributes an answer
+ * to a model that never saw the question.
+ */
+describe('AskService.askStream — metrics', () => {
+  const usageFrame = (completion: number) =>
+    `data: ${JSON.stringify({
+      choices: [],
+      usage: { prompt_tokens: 11, completion_tokens: completion, total_tokens: 11 + completion },
+    })}\n\n`;
+
+  it('reports the model the gateway served, not the one configured', async () => {
+    const svc = makeService([hit], frame('hi [1]') + usageFrame(19) + 'data: [DONE]\n\n');
+    const done = (await collect(svc.askStream('q'))).at(-1) as any;
+
+    // Configured `test-model`; gateway answered with gemma. The served name wins.
+    expect(done.metrics.model).toBe('google/gemma-4-31b-it');
+    expect(done.metrics.substituted).toBe(true);
+    expect(done.metrics.requestId).toBe('req-abc');
+    expect(done.metrics.attempts).toBe(1);
+  });
+
+  it('carries the provider-reported token counts', async () => {
+    const svc = makeService([hit], frame('hi [1]') + usageFrame(19) + 'data: [DONE]\n\n');
+    const done = (await collect(svc.askStream('q'))).at(-1) as any;
+
+    expect(done.metrics.promptTokens).toBe(11);
+    expect(done.metrics.completionTokens).toBe(19);
+    expect(done.metrics.totalTokens).toBe(30);
+    expect(done.metrics.ttftMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it('omits token counts when the provider sends no usage frame', async () => {
+    const svc = makeService([hit], frame('hi [1]') + 'data: [DONE]\n\n');
+    const done = (await collect(svc.askStream('q'))).at(-1) as any;
+
+    // The model is still known (it came from a header); the counts are not.
+    expect(done.metrics.model).toBe('google/gemma-4-31b-it');
+    expect(done.metrics.totalTokens).toBeUndefined();
+    // Never Infinity or NaN — with no completion count there is no rate to give.
+    expect(done.metrics.tokensPerSec).toBeUndefined();
+  });
+
+  it('does not flag a vendor-prefixed name as a substitution', async () => {
+    const svc = makeService([hit], frame('hi [1]'), {
+      'x-g2p-reply-model': 'google/test-model', // same model, vendor-prefixed
+    });
+    const done = (await collect(svc.askStream('q'))).at(-1) as any;
+    expect(done.metrics.substituted).toBe(false);
+  });
+
+  it('survives a provider that returns no telemetry headers', async () => {
+    const svc = makeService([hit], frame('hi [1]'), null);
+    const events = await collect(svc.askStream('q'));
+    const done = events.at(-1) as any;
+
+    // The answer must still arrive — telemetry is ancillary and must never be
+    // able to fail the reply it describes.
+    const text = events.filter((e) => e.type === 'delta').map((e: any) => e.text).join('');
+    expect(text).toBe('hi [1]');
+    expect(done.degraded).toBe(false);
+    // Falls back to the configured model rather than inventing one.
+    expect(done.metrics.model).toBe('test-model');
+  });
+
+  it('emits no metrics at all when the LLM is unreachable', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 503, text: async () => 'down' })));
+    const svc = makeService([hit]);
+    const done = (await collect(svc.askStream('q'))).at(-1) as any;
+
+    expect(done.degraded).toBe(true);
+    // No headers, no usage — fabricating zeroes would misreport a failed call.
+    expect(done.metrics).toBeUndefined();
   });
 });
