@@ -488,3 +488,32 @@
 
 **Status:**
 - Completed
+---
+### [2026-07-15] - Footprint reduction: Qdrant int8 quantization, orphan reclaim, PG insert batching
+
+**Objective:**
+- Cut Atlas memory/CPU footprint (esp. Qdrant's ~2GB boot peak) while keeping search 100% reliable.
+
+**Summary of Work:**
+- Qdrant: enabled scalar int8 quantization (quantile 0.99, always_ram) on the dense vectors — new collections get it in ensure(), and a one-shot guarded boot step (ensureQuantized + `quantized:<collection>` marker) retrofits it onto the live collection in place, no re-embed. Added max_segment_size=64000 to cap the boot re-optimization RAM spike.
+- Qdrant: added reclaimOrphans() — drops collections carrying our COLLECTION_PREFIX that aren't the active/current one. Ran at boot, reclaimed kdbscope_bundled_xenova_all_minilm_l6_v2_384 (338MB, dead since the Ollama model switch).
+- Postgres: rewrote insertEntries from one INSERT round-trip per entry to a single multi-row INSERT per ~5400-row chunk (dedup within the batch, RETURNING id+dedup_key to re-pair). Dominant historical indexer cost (292k sequential queries) collapsed to batched statements.
+- Search: query() now fetches with_payload:['entry_id'] instead of the whole payload (hydrate reads only entry_id; the rest comes from Postgres).
+- Docs: tightened the frozen-name comments in qdrant.ts (product is Atlas; kdbscope_ prefix is a permanent storage key, rename only during a re-embed).
+
+**Key Decisions & Rationale:**
+- No rename of kdbscope_ storage keys: my optimizations need no reindex, so renaming would mean deliberately triggering an hours-long re-embed for internal cosmetics. Frozen names stay frozen; user confirmed.
+- Dropped the planned FTS length-cap change (200KB->8/32KB): measured pg_column_size showed the 128MB tsvector total comes from 292k normal rows, not outliers — the huge (>32KB) rows contribute <1MB. Lowering the cap would rewrite the whole table for <1MB. Not worth it; kept FTS fallback untouched.
+- Quantization keeps fp32 originals on disk for rescoring (always_ram quantizes the RAM-resident copy), so recall loss is <1% for Cosine — verified search stayed mode=hybrid, degraded=false across sample queries.
+
+**Code/Files Modified:**
+- packages/core/src/qdrant.ts
+- packages/core/src/catalog.ts
+- packages/indexer/src/main.ts
+
+**Outcomes & Lessons Learned:**
+- **What Worked:** Qdrant cold-boot RAM ~590MB peak / ~530-597MB settled, down from the ~2GB peak the user observed. Orphan gone. 430/430 tests pass; new scans index via the batch path with no errors; entry count grew with no data loss.
+- **What Failed:** Initial hypothesis that FTS bloat was outlier-driven — measurement disproved it, so that change was correctly abandoned before implementation. On-disk only dropped 1.7G->1.6G because always_ram quantization adds int8 vectors alongside the fp32 originals; the disk win is the orphan (-338M), the RAM win is quantization.
+
+**Status:**
+- Completed

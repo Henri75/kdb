@@ -31,16 +31,49 @@ export interface VectorPoint {
 }
 
 /**
- * The `kdbscope_` prefix is the tool's former name and is deliberately frozen:
- * it is the key the live collections are stored under. Renaming it to `atlas_`
- * would point the indexer at a collection that does not exist — it would create
- * an empty one and search would return nothing until a full re-embed of every
- * entry. Cosmetic gain, hours of rebuild. Leave it.
+ * The product is Atlas; the `kdbscope_` prefix is the former name and is FROZEN
+ * PERMANENTLY. It is the storage key the live collection is stored under: every
+ * one of the ~324k dense vectors lives in `kdbscope_<provider>_<model>_<dim>`.
+ * Renaming the prefix to `atlas_` points the indexer at a collection that does
+ * not exist — it creates an empty one and search returns nothing until a full
+ * re-embed of every entry (hours). This is an internal namespace users never
+ * see; do NOT attempt the rename unless a full re-embed is already happening
+ * for another reason. The matching id namespace is frozen for the same reason
+ * (see ids.ts). Cosmetic gain, hours of rebuild. Leave it.
+ *
+ * `COLLECTION_PREFIX` is the guard the orphan-reclaim path uses: we only ever
+ * drop collections we ourselves created, never anything else in Qdrant.
  */
+export const COLLECTION_PREFIX = 'kdbscope_';
+
 export function collectionNameFor(provider: string, model: string, dim: number): string {
   const safe = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '_');
-  return `kdbscope_${safe(provider)}_${safe(model)}_${dim}`;
+  return `${COLLECTION_PREFIX}${safe(provider)}_${safe(model)}_${dim}`;
 }
+
+/**
+ * Scalar int8 quantization: keeps a 1-byte-per-dimension approximation of each
+ * dense vector in RAM (≈4× smaller than the fp32 original) and rescores the
+ * top candidates against the full-precision vectors on disk. Recall loss for
+ * Cosine is well under a percent, while the resident set of the 768-dim
+ * collection drops from ~1GB of raw vectors to ~250MB. `quantile: 0.99` clips
+ * outlier dimensions so the int8 range is not wasted on a few extreme values.
+ */
+const QUANTIZATION = {
+  scalar: { type: 'int8' as const, quantile: 0.99, always_ram: true },
+};
+
+/**
+ * Optimizer bounds chosen to cap the boot-time RAM spike. On start Qdrant
+ * re-optimizes segments, pulling vectors into RAM to (re)build HNSW; a single
+ * giant segment makes that spike the size of the whole collection. Capping the
+ * segment size bounds how much is resident at once, trading a slightly larger
+ * graph for a much lower peak — which is what a memory-constrained host feels.
+ */
+const OPTIMIZERS = {
+  // ~64k vectors per segment: several smaller segments instead of one huge one.
+  max_segment_size: 64_000,
+};
 
 /**
  * Translate search filters into a Qdrant payload filter. An over-broad filter
@@ -120,6 +153,11 @@ export class VectorStore {
       await this.client.createCollection(this.collection, {
         vectors: { dense: { size: denseDim, distance: 'Cosine' } },
         sparse_vectors: { sparse: { modifier: 'idf' } },
+        // int8-quantize the dense vectors from the start; ~4× less RAM with
+        // negligible recall loss (see QUANTIZATION). Only the dense branch is
+        // quantized — sparse vectors are already tiny.
+        quantization_config: QUANTIZATION,
+        optimizers_config: OPTIMIZERS,
       });
     }
     // Runs on existing collections too: payload fields added after a
@@ -144,6 +182,53 @@ export class VectorStore {
         })
         .catch(() => {}); // already indexed
     }
+  }
+
+  /**
+   * Retrofit int8 quantization onto the active collection in place — no
+   * re-embed. Qdrant re-optimizes segments from the fp32 vectors already on
+   * disk; search keeps serving throughout (the operation blocks server-side
+   * until current optimizations finish, but the collection stays queryable).
+   * Idempotent: re-applying an identical quantization config is a no-op, so a
+   * caller can guard it with a one-shot marker and never worry about reruns.
+   */
+  async ensureQuantized(): Promise<void> {
+    await this.client.updateCollection(this.collection, {
+      quantization_config: QUANTIZATION,
+      optimizers_config: OPTIMIZERS,
+    });
+  }
+
+  /** Every collection name Qdrant currently holds. */
+  async listCollections(): Promise<string[]> {
+    const r = await this.client.getCollections();
+    return r.collections.map((c) => c.name);
+  }
+
+  /**
+   * Delete collections we created that are neither the active one nor the
+   * currently-selected embedder's collection — the dead weight a past model
+   * switch leaves behind (see the dashboard's "orphaned vectors" callout).
+   *
+   * Guard rails, because this deletes data: only names carrying our own
+   * COLLECTION_PREFIX are ever touched, and both `keep` names are always
+   * spared. Everything dropped is rebuildable from Postgres, so the worst case
+   * is a re-embed, never lost source data. Returns the names actually dropped.
+   */
+  async reclaimOrphans(keep: string[]): Promise<string[]> {
+    const spare = new Set(keep.filter(Boolean));
+    const dropped: string[] = [];
+    for (const name of await this.listCollections()) {
+      if (!name.startsWith(COLLECTION_PREFIX)) continue; // never ours → never touch
+      if (spare.has(name)) continue;
+      try {
+        await this.client.deleteCollection(name);
+        dropped.push(name);
+      } catch {
+        // A collection that vanished under us is already reclaimed.
+      }
+    }
+    return dropped;
   }
 
   /**
@@ -248,6 +333,11 @@ export class VectorStore {
     const sparseQuery = { indices: opts.sparse.indices, values: opts.sparse.values };
     const perBranch = Math.max(opts.limit * 3, 30);
 
+    // Only `entry_id` is read below — every hit is then rehydrated from
+    // Postgres (SearchService.hydrate). Fetching the whole payload (project,
+    // source_type, component, session_id, occurred_at…) shipped bytes the
+    // caller throws away; scope it to the one field we use.
+    const withPayload = ['entry_id'];
     const res = opts.dense
       ? await this.client.query(this.collection, {
           prefetch: [
@@ -256,14 +346,14 @@ export class VectorStore {
           ],
           query: { fusion: 'rrf' },
           limit: opts.limit,
-          with_payload: true,
+          with_payload: withPayload,
         })
       : await this.client.query(this.collection, {
           query: sparseQuery,
           using: 'sparse',
           limit: opts.limit,
           filter,
-          with_payload: true,
+          with_payload: withPayload,
         });
 
     return res.points.map((p) => ({

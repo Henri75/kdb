@@ -228,17 +228,40 @@ export class Catalog {
     );
   }
 
-  /** Idempotent bulk insert; returns ids of NEW entries only (existing ones are skipped). */
+  /**
+   * Idempotent bulk insert; returns ids of NEW entries only (existing ones are
+   * skipped). One multi-row INSERT per chunk instead of a round-trip per entry
+   * — a single transcript emits tens of thousands of entries, and the old
+   * per-row loop made that many sequential awaited queries the dominant indexer
+   * cost. RETURNING with ON CONFLICT DO NOTHING yields only the rows actually
+   * inserted, so `dedup_key` rides back with each id to re-pair it to its Entry.
+   */
   async insertEntries(projectId: number, entries: Entry[]): Promise<InsertedEntry[]> {
-    const out: InsertedEntry[] = [];
+    if (!entries.length) return [];
+
+    // Two identical dedup_keys in ONE statement would make ON CONFLICT try to
+    // affect the same row twice; collapse them here so the DB never sees a
+    // within-statement clash. First occurrence wins — they are byte-identical
+    // by construction (the key hashes the content), so which one is arbitrary.
+    const byKey = new Map<string, { entry: Entry; key: string }>();
     for (const e of entries) {
-      const r = await this.pool.query(
-        `INSERT INTO entries (project_id, source_type, component, session_id, title, body,
-                              occurred_at, source_path, source_ref, meta, dedup_key)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-         ON CONFLICT (dedup_key) DO NOTHING
-         RETURNING id`,
-        [
+      const key = Catalog.dedupKey(e);
+      if (!byKey.has(key)) byKey.set(key, { entry: e, key });
+    }
+    const rows = [...byKey.values()];
+
+    // 11 params/row against Postgres's 65535-parameter ceiling → cap the chunk
+    // well under it so a huge file still fits in whole statements.
+    const COLS = 11;
+    const MAX_ROWS = Math.floor(60000 / COLS); // ~5454
+    const out: InsertedEntry[] = [];
+
+    for (let start = 0; start < rows.length; start += MAX_ROWS) {
+      const slice = rows.slice(start, start + MAX_ROWS);
+      const params: unknown[] = [];
+      const tuples = slice.map(({ entry: e, key }, i) => {
+        const b = i * COLS;
+        params.push(
           projectId,
           e.sourceType,
           e.component ?? null,
@@ -249,10 +272,24 @@ export class Catalog {
           e.sourcePath,
           e.sourceRef ?? null,
           JSON.stringify(e.meta ?? {}),
-          Catalog.dedupKey(e),
-        ],
+          key,
+        );
+        return `($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6},$${b + 7},$${b + 8},$${b + 9},$${b + 10},$${b + 11})`;
+      });
+      const r = await this.pool.query(
+        `INSERT INTO entries (project_id, source_type, component, session_id, title, body,
+                              occurred_at, source_path, source_ref, meta, dedup_key)
+         VALUES ${tuples.join(',')}
+         ON CONFLICT (dedup_key) DO NOTHING
+         RETURNING id, dedup_key`,
+        params,
       );
-      if (r.rows[0]) out.push({ id: r.rows[0].id, entry: e });
+      // Re-pair each inserted id with its Entry via dedup_key.
+      const entryByKey = new Map(slice.map((s) => [s.key, s.entry]));
+      for (const row of r.rows) {
+        const entry = entryByKey.get(row.dedup_key);
+        if (entry) out.push({ id: row.id, entry });
+      }
     }
     return out;
   }

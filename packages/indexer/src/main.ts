@@ -144,6 +144,34 @@ async function main() {
   // Publish only now: readers switch to the new collection once it can serve.
   await catalog.setSetting('active_collection', vectors.collection);
 
+  // Retrofit int8 quantization onto the live collection once. Guarded by a
+  // marker keyed to the collection so it runs a single time per collection and
+  // never on every boot. Done AFTER the collection is published and any
+  // backfill finished, so search is already serving from it. Best-effort: a
+  // transient Qdrant hiccup here must not stop the indexer from scanning.
+  const quantKey = `quantized:${vectors.collection}`;
+  if ((await catalog.getSetting(quantKey).catch(() => null)) !== 'v1') {
+    try {
+      await vectors.ensureQuantized();
+      await catalog.setSetting(quantKey, 'v1').catch(() => {});
+      console.log(`[indexer] int8 quantization applied to ${vectors.collection}`);
+    } catch (e) {
+      console.warn(`[indexer] could not apply quantization (will retry next boot): ${(e as Error).message}`);
+    }
+  }
+
+  // Reclaim collections left behind by past model switches. Keeps the active
+  // collection and the one this embedder writes to (identical here, but the
+  // pair is explicit so a future divergence can't drop a live collection).
+  // Only ever touches our own COLLECTION_PREFIX names.
+  try {
+    const active = (await catalog.getSetting('active_collection')) ?? vectors.collection;
+    const dropped = await vectors.reclaimOrphans([active, vectors.collection]);
+    if (dropped.length) console.log(`[indexer] reclaimed orphaned collections: ${dropped.join(', ')}`);
+  } catch (e) {
+    console.warn(`[indexer] orphan reclaim skipped: ${(e as Error).message}`);
+  }
+
   const worker = new Worker<ScanJobData>(
     SCAN_QUEUE,
     async (job) => {

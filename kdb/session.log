@@ -131,3 +131,11 @@
 
 **AI Response Summary:**
 > Widened the existing Ask-only `Markdown` component into the single renderer for all indexed content and wired it into the entry drawer, components view, session transcripts and search snippets. Made citation markers opt-in (so `[1]` in a commit body stays literal), moved filter highlighting into the post-sanitize string pipeline, and added a `compact` variant that repairs snippets cut mid-syntax. 430/430 tests pass; verified against live API content.
+---
+### [2026-07-15 23:10 UTC]
+
+**User Prompt Summary:**
+> Improve/reduce Atlas footprint (memory + CPU), optimize Qdrant and Postgres including schema/SQL, while staying 100% safe and reliable. Confirmed: no rename of frozen kdbscope_ storage keys; proceed with optimizations + clarifying comments.
+
+**AI Response Summary:**
+> Profiled the live stack, found the ~2GB Qdrant use was a boot/optimization peak. Enabled int8 quantization (in-place retrofit, no re-embed) + capped segment size -> ~590MB cold-boot peak. Reclaimed a 338MB orphan collection. Batched insertEntries into multi-row INSERTs. Scoped search payload to entry_id only. Measured FTS-cap idea and abandoned it (<1MB benefit). 430/430 tests pass, search stays hybrid/non-degraded, no data loss.
