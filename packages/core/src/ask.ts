@@ -220,6 +220,12 @@ export class AskService {
     private searchService: SearchService,
     private catalog: Catalog,
     private llmConfig: AppConfig['llm'],
+    /**
+     * Deployment identity for G2P stats (`X-G2P-Client-Id`). Optional so the
+     * chat helpers fall back to the shared default; pass `cfg.g2pClientId` to
+     * honour an operator override.
+     */
+    private g2pClientId?: string,
   ) {}
 
   /**
@@ -331,7 +337,9 @@ export class AskService {
       return { answer: NO_MATCH, sources: [], model: this.llmConfig.model, degraded: false };
     }
     try {
-      const answer = await chatComplete(this.llmConfig, messages);
+      const answer = await chatComplete(this.llmConfig, messages, {
+        clientId: this.g2pClientId,
+      });
       return { answer, sources, model: this.llmConfig.model, degraded: false, scopeFallback };
     } catch (e) {
       // LLM down: still useful — return the retrieved sources with an explanation.
@@ -385,6 +393,7 @@ export class AskService {
 
     try {
       for await (const delta of chatStream(this.llmConfig, prepared.messages, {
+        clientId: this.g2pClientId,
         onMeta: (m) => {
           meta = m;
         },

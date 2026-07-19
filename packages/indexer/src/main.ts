@@ -70,7 +70,7 @@ async function main() {
   }
   for (const m of MARKERS) await catalog.setSetting(m.key, m.want);
 
-  const embedder = await createEmbedder(cfg.embeddings);
+  const embedder = await createEmbedder(cfg.embeddings, cfg.g2pClientId);
   console.log(`[indexer] embedder: ${embedder.name}/${embedder.model} dim=${embedder.dim}`);
 
   const vectors = new VectorStore(

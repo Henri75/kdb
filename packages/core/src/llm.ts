@@ -1,4 +1,5 @@
 import type { AppConfig } from './config.js';
+import { g2pClientHeaders } from './g2pHeaders.js';
 import { HttpError, withRetry, type RetryOptions } from './retry.js';
 
 /**
@@ -44,6 +45,12 @@ export interface StreamMeta {
 
 const RETRYABLE = new Set([429, 500, 502, 503, 504]);
 
+/**
+ * Outbound caller identity lives in one module (`g2pHeaders.ts`) so the chat and
+ * embedding paths cannot drift apart on header name, default, or sanitising.
+ */
+export { CLIENT_ID_HEADER, DEFAULT_G2P_CLIENT_ID, g2pClientHeaders } from './g2pHeaders.js';
+
 /** Thrown for a malformed success response — retrying cannot repair it. */
 class MalformedResponseError extends Error {
   readonly status = 422;
@@ -58,7 +65,13 @@ class MalformedResponseError extends Error {
 export async function chatComplete(
   cfg: AppConfig['llm'],
   messages: ChatMessage[],
-  opts: { maxTokens?: number; temperature?: number; retry?: RetryOptions } = {},
+  opts: {
+    maxTokens?: number;
+    temperature?: number;
+    retry?: RetryOptions;
+    /** Deployment identity for G2P stats; omit to use the shared default. */
+    clientId?: string;
+  } = {},
 ): Promise<string> {
   const url = `${cfg.baseUrl.replace(/\/$/, '')}/chat/completions`;
 
@@ -69,6 +82,7 @@ export async function chatComplete(
         headers: {
           'content-type': 'application/json',
           ...(cfg.apiKey ? { authorization: `Bearer ${cfg.apiKey}` } : {}),
+          ...g2pClientHeaders(opts.clientId),
         },
         body: JSON.stringify({
           model: cfg.model,
@@ -161,6 +175,8 @@ export async function* chatStream(
     maxTokens?: number;
     temperature?: number;
     retries?: number;
+    /** Deployment identity for G2P stats; omit to use the shared default. */
+    clientId?: string;
     /**
      * Called as telemetry becomes known: once with the response headers, again
      * at the first token (ttft), and once more if a usage frame arrives. A
@@ -203,6 +219,7 @@ export async function* chatStream(
           'content-type': 'application/json',
           accept: 'text/event-stream',
           ...(cfg.apiKey ? { authorization: `Bearer ${cfg.apiKey}` } : {}),
+          ...g2pClientHeaders(opts.clientId),
         },
         body,
         signal: AbortSignal.timeout(300_000),

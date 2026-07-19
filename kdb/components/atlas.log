@@ -668,3 +668,41 @@
 
 **Status:**
 - Completed
+---
+### [2026-07-19] - G2P client-id attribution on outbound LLM calls
+
+**Objective:**
+- Identify Atlas to G2P on every LLM/embedding call so our token spend is attributed instead of landing in G2P's anonymous bucket.
+
+**Summary of Work:**
+- Added `packages/core/src/g2pHeaders.ts` as the single home for outbound caller identity: header name, default id, and sanitising.
+- Header `X-G2P-Client-Id` now sent from all three call sites: `chatComplete`, `chatStream` (packages/core/src/llm.ts) and the OpenAI-compatible embeddings client.
+- New config `g2pClientId` (`KDB_G2P_CLIENT_ID`, default `Atlas`), threaded from api/indexer mains into AskService and createEmbedder.
+- Docs: new "Identifying ourselves to G2P" section in docs/configuration.md; .env.example entry.
+
+**Key Decisions & Rationale:**
+- ONE top-level `g2pClientId` rather than per-surface `llm.clientId`/`embeddings.clientId`: the id names the *deployment*, not an endpoint. User chose this shape when both existed in the tree.
+- Sent unconditionally, not gated on `LLM_PROVIDER`: G2P treats it as pure telemetry (never routes on it) and non-G2P endpoints ignore unknown X- headers, so a provider check would be complexity with no benefit.
+- Sanitise client-side (trim, strip control chars, 128 cap) mirroring G2P's server-side rules, so a value read off /hstats always matches config.
+- `KDB_G2P_CLIENT_ID` is read RAW, not through `opt()`: opt() maps '' to undefined, which zod then replaces with the default — silently turning the documented "send nothing" opt-out into a no-op.
+
+**Code/Files Modified:**
+- packages/core/src/g2pHeaders.ts
+- packages/core/src/llm.ts
+- packages/core/src/config.ts
+- packages/core/src/ask.ts
+- packages/core/src/embeddings/openaiCompat.ts
+- packages/core/src/embeddings/index.ts
+- packages/api/src/main.ts
+- packages/indexer/src/main.ts
+- test/core/llmComplete.test.ts
+- docs/configuration.md
+- .env.example
+
+**Outcomes & Lessons Learned:**
+- **What Worked:** Live probe against the running G2P (port 8181) with `X-G2P-Client-Id: AtlasProbe` returned 200 and the durable stats row in google-gemini-pool/stats/2026-07-19.jsonl recorded `client_id: "AtlasProbe"` — end-to-end confirmation, not just a stubbed-fetch assertion.
+- **What Failed:** Two competing implementations briefly coexisted (a per-surface `clientId` and a top-level `g2pClientId` referencing an unimported constant), which broke the config module with `DEFAULT_G2P_CLIENT_ID is not defined`. Resolved by consolidating on g2pHeaders.ts and asking which shape to keep rather than picking unilaterally.
+- **Lesson:** The empty-string-vs-unset distinction is load-bearing here; routing the var through the usual `opt()` helper would have quietly removed the opt-out.
+
+**Status:**
+- Completed

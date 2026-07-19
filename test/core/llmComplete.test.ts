@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { chatComplete } from '../../packages/core/src/llm.js';
+import { chatComplete, DEFAULT_G2P_CLIENT_ID } from '../../packages/core/src/llm.js';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -81,6 +81,37 @@ describe('chatComplete', () => {
     const noKey = stub([{ ok: true, body: okBody }]);
     await chatComplete(cfg, msgs);
     expect((noKey.mock.calls[0] as any)[1].headers.authorization).toBeUndefined();
+  });
+
+  it('sends the client id to G2P for request attribution', async () => {
+    const fn = stub([{ ok: true, body: okBody }]);
+    await chatComplete(cfg, msgs, { clientId: 'Atlas' });
+    expect((fn.mock.calls[0] as any)[1].headers['X-G2P-Client-Id']).toBe('Atlas');
+  });
+
+  it('falls back to the default client id when none is configured', async () => {
+    const fn = stub([{ ok: true, body: okBody }]);
+    await chatComplete(cfg, msgs);
+    expect((fn.mock.calls[0] as any)[1].headers['X-G2P-Client-Id']).toBe(DEFAULT_G2P_CLIENT_ID);
+  });
+
+  it('omits the header when the client id is explicitly empty', async () => {
+    // The documented opt-out for anyone who wants anonymous traffic.
+    const fn = stub([{ ok: true, body: okBody }]);
+    await chatComplete(cfg, msgs, { clientId: '' });
+    expect((fn.mock.calls[0] as any)[1].headers['X-G2P-Client-Id']).toBeUndefined();
+  });
+
+  it('sanitises the client id to match what G2P will record', async () => {
+    // Control chars would otherwise be stripped server-side, leaving our config
+    // and the /hstats dashboard disagreeing about the caller's name.
+    const fn = stub([{ ok: true, body: okBody }]);
+    await chatComplete(cfg, msgs, { clientId: ' At\nlas  ' });
+    expect((fn.mock.calls[0] as any)[1].headers['X-G2P-Client-Id']).toBe('Atlas');
+
+    const long = stub([{ ok: true, body: okBody }]);
+    await chatComplete(cfg, msgs, { clientId: 'x'.repeat(200) });
+    expect((long.mock.calls[0] as any)[1].headers['X-G2P-Client-Id']).toHaveLength(128);
   });
 
   it('posts the configured model and messages', async () => {

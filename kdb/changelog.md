@@ -42,3 +42,4 @@
 - [COMPLETED] - 2026-07-19 01:34 UTC - Bugfix - mcp/build - Stop deploys silently and permanently dropping atlas_* tools from live agent sessions
 - [COMPLETED] - [2026-07-19 03:40 UTC] - [Feature] - [atlas] - atlas adoption: transcript-based measurement of whether agents call Assessor/Atlas when documented triggers apply (Tier 1 usage + Tier 2 candidate misses). First run over 3760 sessions: assessor 16%, atlas 5% fire rate. 489 tests green
 - [COMPLETED] - [2026-07-19 04:20 UTC] - [Feature] - [atlas] - atlas adoption --compare/--until: before-vs-after windows for instruction changes, with sample-size guards and caveats. Found both tools at 0 calls before June 2026 (did not exist), so all-time rates are diluted. 495 tests green
+- [COMPLETED] - 2026-07-19 15:09 UTC - Feature - atlas - Send X-G2P-Client-Id on all outbound LLM/embedding calls for G2P per-client stats

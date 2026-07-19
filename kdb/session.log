@@ -172,3 +172,11 @@
 
 **AI Response Summary:**
 > Explained that forcing a reply is not possible and would manufacture confabulated answers, but that the logging half is fully solvable from transcripts — which record both tool calls and the surrounding reasoning. Built `atlas adoption` (Tier 1 usage counting + Tier 2 trigger detection), tuned the detectors against 3,760 real sessions after the first pass proved noisy, and documented it.
+---
+### [2026-07-19 15:09 UTC]
+
+**User Prompt Summary:**
+> Implement G2P's X-G2P-Client-Id header in Atlas so all LLM calls carry a client id for stats; update tests and docs, then commit and push.
+
+**AI Response Summary:**
+> Added g2pHeaders.ts as the single source for outbound caller identity and wired X-G2P-Client-Id into chatComplete, chatStream and the OpenAI-compatible embeddings client via a new KDB_G2P_CLIENT_ID config (default Atlas). Verified end-to-end against the live G2P instance (client_id recorded in its stats JSONL), added 4 header tests (499 passing), and documented the knob.

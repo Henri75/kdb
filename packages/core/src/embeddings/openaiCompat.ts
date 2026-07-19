@@ -1,3 +1,4 @@
+import { g2pClientHeaders } from '../g2pHeaders.js';
 import { HttpError } from '../retry.js';
 import type { EmbeddingProvider } from './types.js';
 
@@ -10,6 +11,8 @@ export async function createOpenAICompatProvider(opts: {
   baseUrl: string;
   model: string;
   apiKey?: string;
+  /** Sent as `X-G2P-Client-Id` so embedding spend is attributed, not anonymous. */
+  clientId?: string;
 }): Promise<EmbeddingProvider> {
   const embed = async (texts: string[]): Promise<number[][]> => {
     const r = await fetch(`${opts.baseUrl.replace(/\/$/, '')}/embeddings`, {
@@ -17,6 +20,7 @@ export async function createOpenAICompatProvider(opts: {
       headers: {
         'content-type': 'application/json',
         ...(opts.apiKey ? { authorization: `Bearer ${opts.apiKey}` } : {}),
+        ...g2pClientHeaders(opts.clientId),
       },
       body: JSON.stringify({ model: opts.model, input: texts }),
       // Remote endpoints are slower than a local model but still answer in

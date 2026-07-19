@@ -108,6 +108,30 @@ the previous collection until the new one is ready. See
 
 Retry policy per §3.8: 429/5xx retried ≤ 2 with backoff; other 4xx fail fast.
 
+### Identifying ourselves to G2P
+
+| Var | Default | Meaning |
+|---|---|---|
+| `KDB_G2P_CLIENT_ID` | `Atlas` | Sent as `X-G2P-Client-Id` on every LLM **and** embedding call |
+
+G2P attributes each request to a caller and rolls it up in its `/hstats`
+dashboard (unique clients, per-client volume and cost). Without the header our
+traffic lands in the anonymous bucket alongside every other tool pointed at the
+same proxy, which is what made per-consumer accounting unreadable.
+
+The header is purely observational — **G2P never routes on it** — and a non-G2P
+OpenAI-compatible endpoint ignores an unknown header, so it is sent regardless
+of `LLM_PROVIDER` rather than gated on it.
+
+One value covers both surfaces on purpose: it identifies *this deployment*, not
+one endpoint. Set it per instance to tell two Atlas installs apart on the
+dashboard. Set it to an **explicitly empty** string to send no header at all —
+note that unset is different from empty, since unset falls back to the default.
+
+We trim, strip control characters, and truncate to 128 chars before sending —
+mirroring G2P's own server-side sanitising — so a client id read off the
+dashboard always matches what is configured here.
+
 ## Ports (all bound to 127.0.0.1)
 
 | Var | Default | Service |

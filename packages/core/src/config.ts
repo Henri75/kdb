@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { DEFAULT_AGING_MONTHS, DEFAULT_ARCHIVED_PENALTY } from './docStatus.js';
+import { DEFAULT_G2P_CLIENT_ID } from './g2pHeaders.js';
 
 /**
  * Central configuration (§3.1: single source of truth, env-driven).
@@ -51,6 +52,14 @@ const schema = z.object({
     baseUrl: z.string().default('http://host.docker.internal:8181/v1'),
     apiKey: z.string().optional(),
   }),
+  /**
+   * Who we claim to be on outbound LLM/embedding calls (`X-G2P-Client-Id`), so
+   * G2P can attribute usage to KDB rather than the anonymous bucket. Shared by
+   * the chat and embedding clients — it identifies the deployment, not one
+   * endpoint. Set it per instance to tell two KDBs apart on the dashboard; set
+   * it to an empty string to send nothing at all.
+   */
+  g2pClientId: z.string().default(DEFAULT_G2P_CLIENT_ID),
   /** Doc staleness knobs — tune ranking without ever reindexing. */
   docs: z
     .object({
@@ -114,6 +123,10 @@ function fromEnv(env: NodeJS.ProcessEnv): AppConfig {
       baseUrl: opt(env.LLM_BASE_URL),
       apiKey: opt(env.LLM_API_KEY),
     },
+    // NOT `opt()`: that maps '' to undefined, which zod would then replace with
+    // the default — turning the documented "send no client id" opt-out into a
+    // silent no-op. An unset var is undefined and does take the default.
+    g2pClientId: env.KDB_G2P_CLIENT_ID,
     docs: {
       agingMonths: opt(env.KDB_DOCS_AGING_MONTHS),
       archivedPenalty: opt(env.KDB_ARCHIVED_PENALTY),

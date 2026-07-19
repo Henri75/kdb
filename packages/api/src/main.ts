@@ -31,7 +31,7 @@ async function main() {
 
   let embedder: EmbeddingProvider | null = null;
   try {
-    embedder = await createEmbedder(cfg.embeddings);
+    embedder = await createEmbedder(cfg.embeddings, cfg.g2pClientId);
   } catch (e) {
     console.warn('[api] embedder unavailable, sparse/FTS only:', (e as Error).message);
   }
@@ -44,7 +44,7 @@ async function main() {
   const vectors = new VectorStore(cfg.qdrantUrl, collection ?? 'kdbscope_unset');
 
   const search = new SearchService(catalog, vectors, embedder, cfg.docs);
-  const ask = new AskService(search, catalog, cfg.llm);
+  const ask = new AskService(search, catalog, cfg.llm, cfg.g2pClientId);
 
   const connection = new Redis(cfg.redisUrl, { maxRetriesPerRequest: null });
   const queue = new Queue('kdbscope-scan', { connection });

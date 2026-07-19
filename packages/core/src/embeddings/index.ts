@@ -26,7 +26,11 @@ export {
  * on first boot. Every fallback is logged: a silent downgrade to the CPU
  * embedder costs hours on a large index and used to be invisible.
  */
-export async function createEmbedder(cfg: AppConfig['embeddings']): Promise<EmbeddingProvider> {
+export async function createEmbedder(
+  cfg: AppConfig['embeddings'],
+  /** Deployment identity for G2P stats; omit to use the shared default. */
+  g2pClientId?: string,
+): Promise<EmbeddingProvider> {
   switch (cfg.provider) {
     case 'ollama':
       await warnIfOllamaTooOld(cfg.ollamaUrl);
@@ -40,6 +44,7 @@ export async function createEmbedder(cfg: AppConfig['embeddings']): Promise<Embe
         baseUrl: cfg.baseUrl,
         model: cfg.model,
         apiKey: cfg.apiKey,
+        clientId: g2pClientId,
       });
     case 'g2p':
       return createOpenAICompatProvider({
@@ -47,6 +52,7 @@ export async function createEmbedder(cfg: AppConfig['embeddings']): Promise<Embe
         baseUrl: cfg.baseUrl ?? 'http://host.docker.internal:8181/v1',
         model: cfg.model,
         apiKey: cfg.apiKey,
+        clientId: g2pClientId,
       });
     case 'auto':
     default:
