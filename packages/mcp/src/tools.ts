@@ -49,25 +49,27 @@ export const SOURCE_TYPES = [
  */
 export const SERVER_INSTRUCTIONS = `Atlas indexes the recorded history of all this machine's software projects — kdb logs (append-only project journals), Claude Code session transcripts, git commits and docs — and answers questions about what happened, when, and why. Indexing is near-real-time (within ~5 minutes).
 
-CALL ATLAS FIRST when the task involves what happened BEFORE. These are observable
-conditions in your own work, not judgment calls — if one is true, query Atlas before
-reading code to infer the answer:
-- You are about to state why a change was made, why a bug happened, or why something
-  was built a certain way.
-- You are about to explain or reconstruct what a past session did or concluded.
-- You are investigating a report about past behavior ("X was rated poorly", "this
-  regressed", "we tried this before").
-- You are about to write "presumably", "likely because", "this was probably", or
-  "I could not verify" about anything historical.
+== TRIGGERS ==
+IF git/grep told you WHAT changed AND you are about to say WHY -> CALL atlas_ask
+IF you are reconstructing what a past session did or concluded  -> CALL
+IF you are investigating a report about past behavior ("X was rated poorly", "this
+   regressed", "we tried this before", "it worked before the redesign") -> CALL
+IF you are about to write "presumably", "likely because", "this was probably",
+   "the rewrite must have", or "I could not verify" about anything historical -> CALL
+IF a design looks arbitrary and you are about to call it an accident -> CALL
+   (it may have been deliberate, with the rationale on record)
 
-Code shows you the current state. It cannot tell you why someone made a decision, what
-was tried and abandoned, or why a tool behaved a way someone reacted to. Inferring
-history from a current snapshot produces confident, plausible, unverifiable answers —
-exactly the failure Atlas exists to prevent. Reading the code first and calling Atlas
-only to confirm is backwards: by then you have already anchored on a guess.
+DO NOT route to Atlas: "what changed", "when", "which commit", "where is this defined".
+Git, grep and the live DB answer those better — authoritative, instant, no service
+needed. Use them.
 
-Not every task needs Atlas. But deciding to skip it must be a decision you make
-visibly, not one you drift past — see the reporting duty below.
+The seam is the whole rule. "Commit abc123 collapsed two dates into one" is evidence.
+"...because the rewrite simplified the model" is reconstruction. Git cannot see intent;
+that reasoning lives in session transcripts and kdb logs, which is what Atlas indexes.
+
+Not every task needs Atlas, but skip it visibly (see the reporting duty below). "Git
+got there first" is a good reason to skip a WHAT question and no reason at all to skip
+a WHY question.
 
 Atlas is BETA. Treat its output as leads, not ground truth: search ranking may miss things, and atlas_ask answers are synthesized by a mid-size LLM from retrieved snippets — they can be non-exhaustive or wrong, though every claim carries a [n] citation. Before relying on an answer for real work, read the cited source (atlas_entry with the source's entryId, or the hostPath file directly).
 
@@ -79,12 +81,29 @@ How to use it well:
 - Slugs that look like flattened absolute paths (e.g. "users-nasta-documents-…") with an empty rootPath are ghost duplicates from moved checkouts; prefer the clean slug for the same project.
 - Large results are paginated/truncated for context safety (bodyTruncated: true, totalEntries); fetch the full text of a specific entry with atlas_entry.
 
+WHY THESE TRIGGERS (background — the rules above are the operative part):
+
+COST OF CHECKING. The beta caveat above says verify Atlas's claims against the cited
+sources. That makes Atlas a bad trade for anything git already settles — correct,
+don't use it there. It does NOT make it a bad trade for intent questions, because the
+alternative there is not git, it is a guess you will never verify at all. Compare
+Atlas against what you would otherwise ship, not against a cheaper tool that cannot
+answer the question.
+
+CONFIDENCE, NOT FRICTION. You will not feel stuck at the moment you need Atlas. Agents
+reach for unfamiliar tools when blocked, and a WHY question does not block you — you
+can always produce a fluent, plausible explanation from the diff. That fluency is the
+symptom, not evidence of knowing. The smoother the account you are about to give of
+someone else's reasoning, the more likely you are reconstructing it.
+
 If Atlas becomes unreachable mid-task (connection error, server down): any conclusion
 you reach afterwards about past events is UNVERIFIED. Say so explicitly in your summary
 and name what you could not check — do not let an unavailable tool quietly downgrade a
 verifiable claim into a confident guess. If it comes back, revisit what you deferred.
 
-Beta feedback duty: your final report/summary to the user MUST include a short "Atlas usage" note. If you used it: which tools you called and for what, a 1-5 usefulness rating, and any issues hit (wrong or missing answers, errors, slowness). If you did NOT use it on a task that touched project history, say that instead and why in one line ("skipped — the answer was in the working diff", "unavailable — server down", "did not think of it"). A silent omission is the one outcome that teaches nobody anything: an agent that must name its skip notices the choice, and "did not think of it" is the single most useful signal for fixing these instructions. This feedback is how Atlas gets fixed.`;
+Beta feedback duty: your final report/summary to the user MUST include a short "Atlas usage" note. If you used it: which tools you called and for what, a 1-5 usefulness rating, and any issues hit (wrong or missing answers, errors, slowness). If you did NOT use it on a task that touched project history, say that instead and why in one line ("skipped — git settled it and no intent claim was made", "unavailable — server down", "did not think of it"). A silent omission is the one outcome that teaches nobody anything: an agent that must name its skip notices the choice, and "did not think of it" is the single most useful signal for fixing these instructions.
+
+Report the skip you ACTUALLY made, not the one you can justify afterwards. If Atlas never crossed your mind at the moment it applied, "did not think of it" is the honest answer even if you can now construct a sound reason it was unnecessary. A reconstructed justification reads identical to a real decision and is worth nothing as feedback — it silently converts a bug in these instructions into an apparently-correct call. This feedback is how Atlas gets fixed.`;
 
 export const TOOLS: ToolDef[] = [
   {

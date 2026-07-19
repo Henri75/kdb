@@ -138,19 +138,74 @@ describe('server instructions', () => {
    * conditions instead. Pin them so a rewrite can't quietly revert to the
    * softer phrasing.
    */
-  it('tell agents to query history BEFORE inferring it from code', () => {
-    expect(SERVER_INSTRUCTIONS).toMatch(/CALL ATLAS FIRST/);
-    // \s+ not a literal space: the phrase wraps across a line break in the
-    // template literal, and a rewrap must not fail the test.
-    expect(SERVER_INSTRUCTIONS).toMatch(/before\s+reading code to infer/i);
-    // The distinction that makes the rule stick, not just the instruction.
-    expect(SERVER_INSTRUCTIONS).toMatch(/cannot tell you why/i);
+  it('tell agents to query history rather than infer it', () => {
+    // The headline has changed twice; what must survive any rewrite is the
+    // evidence-vs-reconstruction distinction and where the reasoning lives.
+    expect(SERVER_INSTRUCTIONS).toMatch(/Git cannot see intent/);
+    expect(SERVER_INSTRUCTIONS).toMatch(/is reconstruction/);
+    expect(SERVER_INSTRUCTIONS).toMatch(/session transcripts/);
   });
 
   it('name the hedging phrases that signal a missing Atlas call', () => {
     for (const tell of ['presumably', 'likely because', 'could not verify']) {
       expect(SERVER_INSTRUCTIONS).toContain(tell);
     }
+  });
+
+  /**
+   * Agent feedback (2026-07-19, second round): an agent reached for `git log -S`,
+   * got the exact commit, and never called Atlas — then guessed at WHY the change
+   * was made and shipped that guess unverified. Its own proposed fix was sharper
+   * than the abstract "before re-deriving history": key the trigger on the seam
+   * where git stops answering. Pin it — this is the single most discriminating
+   * line in these instructions.
+   */
+  it('key the primary trigger on the git WHAT -> WHY seam', () => {
+    expect(SERVER_INSTRUCTIONS).toMatch(/told you WHAT changed AND you are about to say WHY/);
+    // It must also concede git's superiority, or agents correctly ignore it.
+    expect(SERVER_INSTRUCTIONS).toMatch(/DO NOT route to Atlas/);
+    expect(SERVER_INSTRUCTIONS).toMatch(/Git, grep and the live DB answer those better/);
+  });
+
+  /**
+   * The beta caveat ("verify everything") makes Atlas a bad trade against git —
+   * correctly. Left unqualified it also suppresses use on intent questions, where
+   * the real alternative is an unverified guess rather than a cheaper tool.
+   */
+  it('scope the verification-cost argument to what git can settle', () => {
+    expect(SERVER_INSTRUCTIONS).toMatch(/it is a guess you will never verify at all/);
+    expect(SERVER_INSTRUCTIONS).toMatch(/not against a cheaper tool that cannot/);
+  });
+
+  /** Agents reach for tools when blocked; a WHY question never blocks. */
+  it('name confidence, not friction, as the moment it applies', () => {
+    expect(SERVER_INSTRUCTIONS).toMatch(/CONFIDENCE, NOT FRICTION/);
+    expect(SERVER_INSTRUCTIONS).toMatch(/will not feel stuck/);
+  });
+
+  /**
+   * Assessor's review of these instructions (session eb99ff9d, 2026-07-19):
+   * dense prose buries executable triggers, so restructure rather than cut —
+   * IF/THEN rules first, rationale demoted to a labeled background section.
+   * Pin the shape, since it is the fix, not the wording.
+   */
+  it('put executable triggers above the rationale', () => {
+    const triggers = SERVER_INSTRUCTIONS.indexOf('== TRIGGERS ==');
+    const why = SERVER_INSTRUCTIONS.indexOf('WHY THESE TRIGGERS');
+    expect(triggers).toBeGreaterThan(-1);
+    expect(why).toBeGreaterThan(triggers);
+    expect(SERVER_INSTRUCTIONS).toMatch(/the rules above are the operative part/);
+    // IF/THEN form, not prose the agent has to parse into conditions. Counted
+    // as IF-openers and -> CALL arrows separately: longer triggers wrap onto a
+    // continuation line, so the pair is not always on one line.
+    expect(SERVER_INSTRUCTIONS.match(/^IF /gm)?.length ?? 0).toBeGreaterThanOrEqual(5);
+    expect(SERVER_INSTRUCTIONS.match(/-> CALL/g)?.length ?? 0).toBeGreaterThanOrEqual(5);
+  });
+
+  /** A justification built after the fact hides the gap that caused the skip. */
+  it('demand the honest skip rather than a defensible one', () => {
+    expect(SERVER_INSTRUCTIONS).toMatch(/Report the skip you ACTUALLY made/);
+    expect(SERVER_INSTRUCTIONS).toMatch(/reconstructed justification/);
   });
 
   /** An unreachable tool must not silently downgrade a claim to a guess. */
