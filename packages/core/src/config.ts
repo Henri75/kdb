@@ -54,10 +54,11 @@ const schema = z.object({
   }),
   /**
    * Who we claim to be on outbound LLM/embedding calls (`X-G2P-Client-Id`), so
-   * G2P can attribute usage to KDB rather than the anonymous bucket. Shared by
-   * the chat and embedding clients — it identifies the deployment, not one
-   * endpoint. Set it per instance to tell two KDBs apart on the dashboard; set
-   * it to an empty string to send nothing at all.
+   * G2P attributes usage to us rather than the anonymous bucket. Shared by the
+   * chat and embedding clients — it identifies the deployment, not one
+   * endpoint, and embeddings against the `g2p` provider are billed traffic too.
+   * Set it per instance to tell two deployments apart on the dashboard; set it
+   * to an empty string to send nothing at all.
    */
   g2pClientId: z.string().default(DEFAULT_G2P_CLIENT_ID),
   /** Doc staleness knobs — tune ranking without ever reindexing. */

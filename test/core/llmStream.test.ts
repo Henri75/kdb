@@ -1,5 +1,9 @@
-import { describe, expect, it } from 'vitest';
-import { createSseParser } from '../../packages/core/src/llm.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  DEFAULT_G2P_CLIENT_ID,
+  chatStream,
+  createSseParser,
+} from '../../packages/core/src/llm.js';
 
 const frame = (content: string) =>
   `data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`;
@@ -76,5 +80,71 @@ describe('createSseParser', () => {
       expect(createSseParser()(frame('x'))).toEqual(['x']);
       expect(createSseParser(() => {})(frame('x'))).toEqual(['x']);
     });
+  });
+});
+
+/**
+ * The streaming path builds its headers independently of chatComplete, so an
+ * attribution header added to one and not the other would leave every
+ * interactive answer — the bulk of real traffic — unattributed in G2P stats.
+ */
+describe('chatStream request headers', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const cfg = { provider: 'g2p', model: 'm', baseUrl: 'http://llm/v1' } as any;
+  const msgs = [{ role: 'user' as const, content: 'hi' }];
+
+  /** A single-frame SSE body; enough to drive the generator to completion. */
+  function stubStream() {
+    const fn = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      headers: { get: () => undefined },
+      body: {
+        getReader() {
+          let sent = false;
+          return {
+            read: async () =>
+              sent
+                ? { done: true, value: undefined }
+                : ((sent = true),
+                  {
+                    done: false,
+                    value: new TextEncoder().encode(
+                      `data: ${JSON.stringify({ choices: [{ delta: { content: 'hi' } }] })}\n\n`,
+                    ),
+                  }),
+            releaseLock() {},
+          };
+        },
+      },
+    }));
+    vi.stubGlobal('fetch', fn);
+    return fn;
+  }
+
+  /** Drains the generator so the request is actually issued. */
+  const drain = async (gen: AsyncGenerator<string>) => {
+    for await (const _ of gen) void _;
+  };
+
+  const headersOf = (fn: ReturnType<typeof stubStream>) => (fn.mock.calls[0] as any)[1].headers;
+
+  it('sends the configured client id', async () => {
+    const fn = stubStream();
+    await drain(chatStream(cfg, msgs, { clientId: 'Atlas' }));
+    expect(headersOf(fn)['X-G2P-Client-Id']).toBe('Atlas');
+  });
+
+  it('falls back to the default client id', async () => {
+    const fn = stubStream();
+    await drain(chatStream(cfg, msgs));
+    expect(headersOf(fn)['X-G2P-Client-Id']).toBe(DEFAULT_G2P_CLIENT_ID);
+  });
+
+  it('omits the header when explicitly opted out', async () => {
+    const fn = stubStream();
+    await drain(chatStream(cfg, msgs, { clientId: '' }));
+    expect(headersOf(fn)['X-G2P-Client-Id']).toBeUndefined();
   });
 });

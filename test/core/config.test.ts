@@ -85,3 +85,23 @@ describe('docs staleness config', () => {
     expect(c.docs).toEqual({ agingMonths: 6, archivedPenalty: 0.3 });
   });
 });
+
+describe('G2P client id config', () => {
+  it('defaults to Atlas so stats attribution works with no setup', () => {
+    expect(parseConfig({}).g2pClientId).toBe('Atlas');
+  });
+
+  it('reads KDB_G2P_CLIENT_ID', () => {
+    expect(parseConfig({ KDB_G2P_CLIENT_ID: 'atlas-staging' }).g2pClientId).toBe('atlas-staging');
+  });
+
+  /**
+   * Regression guard: every other var here is read through `opt()`, which maps
+   * '' to undefined and lets zod re-apply the default. Routing this one the
+   * same way would turn the documented opt-out into a silent no-op — the header
+   * would keep being sent by a deployment that asked for anonymity.
+   */
+  it('treats an empty value as an opt-out, not as unset', () => {
+    expect(parseConfig({ KDB_G2P_CLIENT_ID: '' }).g2pClientId).toBe('');
+  });
+});

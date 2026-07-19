@@ -710,3 +710,60 @@
 
 **Status:**
 - Completed
+---
+### [2026-07-19] - G2P client-id attribution on all outbound LLM calls
+
+**Objective:**
+- Identify Atlas to G2P via the X-G2P-Client-Id header so our token spend is attributed to us in /hstats instead of the anonymous bucket.
+
+**Summary of Work:**
+- Added packages/core/src/g2pHeaders.ts: a single g2pClientHeaders() helper that builds the header, mirroring G2P's own sanitising (strip control chars, truncate to 128) so what we send is byte-identical to what the dashboard records.
+- Wired it into all three outbound transports: chatComplete, chatStream (packages/core/src/llm.ts) and createOpenAICompatProvider (embeddings).
+- New top-level config field g2pClientId (env KDB_G2P_CLIENT_ID, default 'Atlas'), threaded through AskService and createEmbedder from api + indexer entrypoints.
+
+**Key Decisions & Rationale:**
+- ONE top-level field rather than nesting under llm: embeddings against the g2p provider are billed traffic on the same proxy, so an llm-only knob would have left the highest-volume caller (indexing) unattributed. The id names the deployment, not an endpoint.
+- Sent unconditionally, NOT gated on provider=g2p: G2P only reads the header for stats and never routes on it, and non-G2P OpenAI-compatible endpoints ignore unknown X- headers. A provider gate would be dead weight that silently breaks if someone points LLM_PROVIDER=openai at G2P.
+- Read KDB_G2P_CLIENT_ID raw instead of through the local opt() helper: opt() maps '' to undefined, which zod then replaces with the default, turning the documented opt-out into a silent no-op. Covered by a regression test.
+- Client id is 'Atlas' (capital A) per user directive; casing is contract, not cosmetics, since 'atlas' and 'Atlas' would appear as two separate clients on the dashboard. Asserted literally in tests.
+
+**Code/Files Modified:**
+- packages/core/src/g2pHeaders.ts (new)
+- packages/core/src/llm.ts
+- packages/core/src/config.ts
+- packages/core/src/embeddings/openaiCompat.ts
+- packages/core/src/embeddings/index.ts
+- packages/core/src/ask.ts
+- packages/api/src/main.ts
+- packages/indexer/src/main.ts
+- test/core/g2pHeaders.test.ts (new)
+- test/core/llmComplete.test.ts, llmStream.test.ts, embeddings.test.ts, config.test.ts
+- docs/configuration.md, .env.example
+
+**Outcomes & Lessons Learned:**
+- **What Worked:** One shared helper as the single seam. Verified by mutation test: suppressing the header failed 12 tests across all four files, confirming coverage spans every transport rather than just the helper's unit tests.
+- **What Failed:** llmStream.test.ts previously only exercised the SSE parser, never chatStream's actual request — the streaming path (the bulk of interactive traffic) had zero header coverage until it was added here. A helper that nobody calls is the real failure mode for this kind of change, so per-transport wire assertions matter more than the unit tests.
+
+**Status:**
+- Completed
+---
+### [2026-07-19] - CORRECTION: duplicate entries for the G2P client-id work
+
+**Objective:**
+- Reconcile two component entries and two changelog lines that describe the SAME change, so a later reader does not infer two separate pieces of work.
+
+**Summary of Work:**
+- No code change. The G2P client-id feature was logged twice on 2026-07-19: "G2P client-id attribution on outbound LLM calls" and "...on all outbound LLM calls" (plus changelog lines at 15:09 and 15:30 UTC). One implementation, one commit.
+- The FIRST entry is authoritative: it is accurate and records the live end-to-end probe. The second adds only the mutation-test detail (suppressing the header failed 12 tests across 4 files, confirming coverage spans every transport).
+- Logs are append-only per §2.6, so the duplicates stay; this note is the reconciliation.
+
+**Key Decisions & Rationale:**
+- Appended a correction rather than editing the earlier blocks: append-only means the record of what was believed at the time has value, including the redundancy.
+
+**Outcomes & Lessons Learned:**
+- **What Worked:** Re-verified the live probe independently before trusting the earlier entry: POST to G2P with `X-G2P-Client-Id: Atlas` returned 200 and google-gemini-pool/stats/2026-07-19.jsonl now carries `client_id:"Atlas"` rows alongside the original `AtlasProbe`.
+- **What Failed:** I briefly doubted the earlier entry's probe claim because a too-narrow grep (sorted by count, tail truncated) did not surface the AtlasProbe row. The entry was truthful; the search was wrong. Verify the query before doubting the record.
+- **Observation for later:** Existing G2P callers use a `service/operation` convention (`Lycos/title_backfill`, `deepcast/analysis`). Our flat `Atlas` cannot separate ask-mode from indexing spend on the dashboard. Deliberate for now — see backlog.
+
+**Status:**
+- Completed

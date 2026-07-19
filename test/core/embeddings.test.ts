@@ -5,6 +5,8 @@ import {
   ollamaHasModel,
   warnIfOllamaTooOld,
 } from '../../packages/core/src/embeddings/ollama.js';
+import { createOpenAICompatProvider } from '../../packages/core/src/embeddings/openaiCompat.js';
+import { DEFAULT_G2P_CLIENT_ID } from '../../packages/core/src/g2pHeaders.js';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -106,5 +108,44 @@ describe('collectionNameFor', () => {
 
   it('never collides across providers with the same dim', () => {
     expect(collectionNameFor('ollama', 'm', 768)).not.toBe(collectionNameFor('openai', 'm', 768));
+  });
+});
+
+/**
+ * Embeddings hit the same G2P proxy as chat and are billed the same way, so
+ * they carry the same attribution header. Indexing is by far the highest-volume
+ * caller, so dropping it here would understate our usage more than anywhere.
+ */
+describe('openai-compatible embeddings client identity', () => {
+  const okBody = { data: [{ index: 0, embedding: [0.1, 0.2] }] };
+
+  /** Captures the request the dimension probe issues on construction. */
+  async function create(clientId?: string) {
+    const fn = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => okBody,
+      text: async () => '',
+    }));
+    vi.stubGlobal('fetch', fn);
+    await createOpenAICompatProvider({
+      name: 'g2p',
+      baseUrl: 'http://llm/v1',
+      model: 'm',
+      clientId,
+    });
+    return (fn.mock.calls[0] as any)[1].headers;
+  }
+
+  it('sends the configured client id', async () => {
+    expect((await create('Atlas'))['X-G2P-Client-Id']).toBe('Atlas');
+  });
+
+  it('falls back to the default client id', async () => {
+    expect((await create())['X-G2P-Client-Id']).toBe(DEFAULT_G2P_CLIENT_ID);
+  });
+
+  it('omits the header when explicitly opted out', async () => {
+    expect((await create(''))['X-G2P-Client-Id']).toBeUndefined();
   });
 });
