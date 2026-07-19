@@ -346,6 +346,80 @@ program
     });
   });
 
+/**
+ * Measures whether agents actually reach for Assessor/Atlas at the moments the
+ * MCP instructions say they should. Reads Claude Code transcripts directly
+ * rather than asking the agent: self-reported non-use is unreliable by
+ * construction — an agent that never noticed a trigger will produce a fluent
+ * post-hoc justification when asked. Tool calls and the reasoning around them
+ * are both already on disk, so we count instead of surveying.
+ */
+program
+  .command('adoption')
+  .description('Are agents calling Assessor/Atlas when they should? (reads Claude Code transcripts)')
+  .option('--since <date>', 'Only sessions on/after this ISO date')
+  .option('--project <substr>', 'Filter by project directory name')
+  .option('--min-turns <n>', 'Ignore sessions below N assistant turns', '5')
+  .option('--limit <n>', 'Max sessions to detail', '15')
+  // --json is a global option on `program`; declaring it again here would shadow
+  // it and silently never bind. Read it through the shared out() helper instead.
+  .action(async (o) => {
+    const { analyzeAdoption } = await import('@atlas/core');
+    const r = await analyzeAdoption({
+      since: o.since,
+      project: o.project,
+      minTurns: Number(o.minTurns) || 5,
+    });
+    out(r, () => {
+    console.log(bold(`\nTool adoption — ${num(r.sessionsScanned)} sessions scanned`));
+    console.log(dim(`${num(r.sessionsWithTriggers)} contained at least one trigger\n`));
+
+    for (const [name, t] of [
+      ['assessor', r.assessor],
+      ['atlas', r.atlas],
+    ] as const) {
+      // fireRate is null when nothing qualified — "no opportunities" must not
+      // render as "never fired".
+      const rate =
+        t.fireRate === null ? dim('n/a') : `${(t.fireRate * 100).toFixed(0)}%`;
+      const colour = t.fireRate === null ? dim : t.fireRate >= 0.5 ? green : red;
+      console.log(
+        `${bold(name.padEnd(9))} used in ${num(t.sessionsUsed)} · missed in ${num(t.sessionsMissed)} · ` +
+          `fire rate ${colour(rate)} · ${num(t.totalCalls)} calls`,
+      );
+      for (const { rule, count } of t.topMissedRules.slice(0, 4)) {
+        console.log(dim(`    ${String(count).padStart(3)}×  ${rule}`));
+      }
+    }
+
+    const admitted = r.sessions.filter((s) => s.admittedNotThoughtOf);
+    if (admitted.length) {
+      console.log(
+        yellow(
+          `\n${num(admitted.length)} session(s) where the agent said it didn't think of the tool` +
+            dim(' — the clearest instruction gap'),
+        ),
+      );
+    }
+
+    console.log(hr());
+    console.log(bold('Candidate missed triggers') + dim(' — heuristic; verify before acting'));
+    for (const s of r.sessions.slice(0, Number(o.limit) || 15)) {
+      const misses = [...s.missedAssessor, ...s.missedAtlas];
+      if (!misses.length) continue;
+      console.log(
+        `\n${cyan(s.sessionId.slice(0, 8))} ${dim(s.project)} ${dim(date(s.startedAt) || '')} ${dim(`${s.turns} turns`)}`,
+      );
+      for (const m of misses) {
+        console.log(`  ${magenta(m.tool)} ${bold(m.rule)}`);
+        console.log(dim(`    "${m.excerpt.slice(0, 160)}"`));
+      }
+    }
+    if (!r.sessions.length) console.log(dim('\n  none found'));
+    console.log();
+    });
+  });
+
 program.parseAsync().catch((e) => {
   console.error(red(`error: ${e.message}`));
   process.exit(1);
